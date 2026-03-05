@@ -238,8 +238,8 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
         holdings_text = ""
         for data in holdings_data:
             holdings_text += f"\n{data['ticker']}:\n"
-            holdings_text += f"  Price: ${data.get('price', 0):.2f}\n"
-            holdings_text += f"  Day Change: {data.get('change_percent', 0):.2f}%\n"
+            holdings_text += f"  Price: ${(data.get('price') or 0):.2f}\n"
+            holdings_text += f"  Day Change: {(data.get('change_percent') or 0):.2f}%\n"
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
             holdings_text += f"  Reddit: {data.get('reddit_sentiment', 'N/A')}\n"
 
@@ -338,7 +338,7 @@ def find_opportunities(trending_data: List[Dict]) -> str:
         # Format trending data
         trending_text = ""
         for data in trending_data:
-            trending_text += f"\n{data['ticker']}: ${data.get('price', 0):.2f} ({data.get('change_percent', 0):+.2f}%)\n"
+            trending_text += f"\n{data['ticker']}: ${(data.get('price') or 0):.2f} ({(data.get('change_percent') or 0):+.2f}%)\n"
             if data.get('headlines'):
                 trending_text += f"  News: {'; '.join(data['headlines'][:2])}\n"
 
@@ -513,13 +513,13 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         else:
             rec_class = 'hold'
 
-        change_class = 'positive' if h.get('change_percent', 0) >= 0 else 'negative'
+        change_class = 'positive' if (h.get('change_percent') or 0) >= 0 else 'negative'
 
         html += f"""
                     <tr>
                         <td><strong>{h['ticker']}</strong></td>
-                        <td>${h.get('price', 0):.2f}</td>
-                        <td class="{change_class}">{h.get('change_percent', 0):+.2f}%</td>
+                        <td>${(h.get('price') or 0):.2f}</td>
+                        <td class="{change_class}">{(h.get('change_percent') or 0):+.2f}%</td>
                         <td><span class="{rec_class}">{h['recommendation']}</span></td>
                         <td>{h['confidence']}</td>
                         <td>{h['reason']}</td>
