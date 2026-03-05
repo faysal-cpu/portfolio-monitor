@@ -574,11 +574,11 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 === YOUR HOLDINGS ===
 """
     for h in holdings:
-        plain += f"\n{h['ticker']}: ${h['price']:.2f} ({h['change_percent']:+.2f}%)\n"
-        plain += f"  Recommendation: {h['recommendation']} ({h['confidence']} confidence)\n"
-        plain += f"  Reason: {h['reason']}\n"
-        plain += f"  Risk: {h['risk']}\n"
-        plain += f"  Reddit: {h['reddit']}\n"
+        plain += f"\n{h['ticker']}: ${(h.get('price') or 0):.2f} ({(h.get('change_percent') or 0):+.2f}%)\n"
+        plain += f"  Recommendation: {h.get('recommendation', 'N/A')} ({h.get('confidence', 'N/A')} confidence)\n"
+        plain += f"  Reason: {h.get('reason', 'N/A')}\n"
+        plain += f"  Risk: {h.get('risk', 'N/A')}\n"
+        plain += f"  Reddit: {h.get('reddit', 'N/A')}\n"
 
     if opportunities:
         plain += "\n=== OPPORTUNITIES ===\n"
