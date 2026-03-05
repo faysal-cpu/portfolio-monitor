@@ -31,19 +31,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables - HARDCODED PATH
-# UPDATE THIS PATH if your .env file is elsewhere
-ENV_FILE_PATH = r"C:\Users\6135564\OneDrive - Thomson Reuters Incorporated\Desktop\portfolio-monitor\.env"
+# Load environment variables - AUTO-DETECT PATH
+# Get the directory where main.py is located (works on both Windows and Linux)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+ENV_FILE_PATH = os.path.join(script_dir, '.env')
 
 logger.info("="*60)
 logger.info("ENVIRONMENT CONFIGURATION")
 logger.info("="*60)
-logger.info(f"Hardcoded .env path: {ENV_FILE_PATH}")
+logger.info(f"Script directory: {script_dir}")
+logger.info(f".env path: {ENV_FILE_PATH}")
 logger.info(f".env file exists: {os.path.exists(ENV_FILE_PATH)}")
 
 if not os.path.exists(ENV_FILE_PATH):
     logger.error(f"CRITICAL ERROR: .env file not found at {ENV_FILE_PATH}")
-    logger.error("Please update ENV_FILE_PATH in main.py to point to your .env file")
+    logger.error("Please create a .env file in the same directory as main.py")
     sys.exit(1)
 
 # Load the .env file
@@ -238,8 +240,8 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
             holdings_text += f"\n{data['ticker']}:\n"
             holdings_text += f"  Price: ${data.get('price', 0):.2f}\n"
             holdings_text += f"  Day Change: {data.get('change_percent', 0):.2f}%\n"
-            holdings_text += f"  News: {'; '.join(data['headlines'][:3]) if data['headlines'] else 'No recent news'}\n"
-            holdings_text += f"  Reddit: {data['reddit_sentiment']}\n"
+            holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
+            holdings_text += f"  Reddit: {data.get('reddit_sentiment', 'N/A')}\n"
 
         prompt = f"""You are a sharp portfolio analyst for a Canadian retail investor using a self-directed TFSA.
 
@@ -336,8 +338,8 @@ def find_opportunities(trending_data: List[Dict]) -> str:
         # Format trending data
         trending_text = ""
         for data in trending_data:
-            trending_text += f"\n{data['ticker']}: ${data['price']:.2f} ({data['change_percent']:+.2f}%)\n"
-            if data['headlines']:
+            trending_text += f"\n{data['ticker']}: ${data.get('price', 0):.2f} ({data.get('change_percent', 0):+.2f}%)\n"
+            if data.get('headlines'):
                 trending_text += f"  News: {'; '.join(data['headlines'][:2])}\n"
 
         prompt = f"""Identify 5 tickers to consider buying today. Investor profile: Canadian TFSA, likes momentum plays, binary catalysts, defence, AI, commodities, small caps. Somewhat risk tolerant.
