@@ -236,8 +236,8 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
         holdings_text = ""
         for data in holdings_data:
             holdings_text += f"\n{data['ticker']}:\n"
-            holdings_text += f"  Price: ${data['price']:.2f}\n"
-            holdings_text += f"  Day Change: {data['change_percent']:.2f}%\n"
+            holdings_text += f"  Price: ${data.get('price', 0):.2f}\n"
+            holdings_text += f"  Day Change: {data.get('change_percent', 0):.2f}%\n"
             holdings_text += f"  News: {'; '.join(data['headlines'][:3]) if data['headlines'] else 'No recent news'}\n"
             holdings_text += f"  Reddit: {data['reddit_sentiment']}\n"
 
@@ -511,13 +511,13 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         else:
             rec_class = 'hold'
 
-        change_class = 'positive' if h['change_percent'] >= 0 else 'negative'
+        change_class = 'positive' if h.get('change_percent', 0) >= 0 else 'negative'
 
         html += f"""
                     <tr>
                         <td><strong>{h['ticker']}</strong></td>
-                        <td>${h['price']:.2f}</td>
-                        <td class="{change_class}">{h['change_percent']:+.2f}%</td>
+                        <td>${h.get('price', 0):.2f}</td>
+                        <td class="{change_class}">{h.get('change_percent', 0):+.2f}%</td>
                         <td><span class="{rec_class}">{h['recommendation']}</span></td>
                         <td>{h['confidence']}</td>
                         <td>{h['reason']}</td>
