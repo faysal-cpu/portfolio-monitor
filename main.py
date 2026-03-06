@@ -572,49 +572,231 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; font-size: 15px; }}
-        .container {{ max-width: 1200px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ background-color: #1A1A2E; color: white; padding: 30px; text-align: center; }}
-        .header h1 {{ margin: 0; font-size: 28px; }}
-        .section {{ padding: 30px; border-bottom: 1px solid #e0e0e0; }}
-        .section h2 {{ color: #1A1A2E; margin-top: 0; border-left: 4px solid #00B386; padding-left: 15px; font-size: 22px; }}
-        .macro-context {{ background-color: #f9f9f9; padding: 20px; border-radius: 5px; line-height: 1.8; font-size: 15px; }}
-        .rec-summary {{ background-color: #f0f0f0; padding: 15px; border-radius: 5px; text-align: center; font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #1A1A2E; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; table-layout: fixed; }}
-        th {{ background-color: #1A1A2E; color: white; padding: 14px 10px; text-align: left; font-weight: 600; font-size: 13px; }}
-        td {{ padding: 14px 10px; border-bottom: 1px solid #e0e0e0; font-size: 14px; vertical-align: top; }}
-        tr:hover {{ background-color: #f5f5f5; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            font-size: 16px;
+            line-height: 1.6;
+            color: #2d3748;
+            -webkit-font-smoothing: antialiased;
+        }}
+        .container {{
+            max-width: 680px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            line-height: 1.3;
+        }}
+        .section {{
+            padding: 32px 24px;
+            border-bottom: 1px solid #e2e8f0;
+        }}
+        .section:last-child {{ border-bottom: none; }}
+        .section h2 {{
+            color: #1a202c;
+            margin: 0 0 20px 0;
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }}
+        .macro-context {{
+            background: linear-gradient(135deg, #f6f8fb 0%, #eef2f7 100%);
+            padding: 24px;
+            border-radius: 12px;
+            line-height: 1.8;
+            font-size: 15px;
+            border-left: 4px solid #667eea;
+            color: #2d3748;
+        }}
+        .macro-context strong {{ color: #1a202c; }}
+        .rec-summary {{
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            padding: 16px 20px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: #2d3748;
+            border: 1px solid #e2e8f0;
+            letter-spacing: 0.3px;
+        }}
 
-        /* Column width optimization for mobile */
-        th:nth-child(1), td:nth-child(1) {{ width: 7%; font-weight: bold; }} /* Ticker */
-        th:nth-child(2), td:nth-child(2) {{ width: 8%; }} /* Price */
-        th:nth-child(3), td:nth-child(3) {{ width: 8%; }} /* Change */
-        th:nth-child(4), td:nth-child(4) {{ width: 11%; }} /* Recommendation */
-        th:nth-child(5), td:nth-child(5) {{ width: 8%; }} /* Confidence */
-        th:nth-child(6), td:nth-child(6) {{ width: 28%; }} /* Reason - WIDER */
-        th:nth-child(7), td:nth-child(7) {{ width: 22%; }} /* Risk - WIDER */
-        th:nth-child(8), td:nth-child(8) {{ width: 8%; }} /* Reddit */
+        /* Stock Cards - Mobile First */
+        .stock-card {{
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            transition: all 0.2s ease;
+        }}
+        .stock-card:hover {{
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            transform: translateY(-2px);
+        }}
+        .stock-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .stock-ticker {{
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a202c;
+            letter-spacing: 0.5px;
+        }}
+        .stock-price {{
+            font-size: 17px;
+            font-weight: 600;
+            color: #2d3748;
+        }}
+        .stock-change {{
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+        }}
+        .stock-change.positive {{ color: #10b981; }}
+        .stock-change.negative {{ color: #ef4444; }}
+        .stock-rec-line {{
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #f1f5f9;
+        }}
+        .stock-detail {{
+            margin: 10px 0;
+            font-size: 14px;
+            line-height: 1.7;
+            color: #4a5568;
+        }}
+        .stock-detail strong {{
+            color: #1a202c;
+            font-weight: 600;
+        }}
 
-        .buy-more {{ background-color: #d4edda; color: #155724; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
-        .hold {{ background-color: #e2e3e5; color: #383d41; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
-        .sell {{ background-color: #f8d7da; color: #721c24; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
-        .watch {{ background-color: #fff3cd; color: #856404; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
+        .buy-more {{
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }}
+        .hold {{
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+        }}
+        .sell {{
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+        }}
+        .watch {{
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            color: white;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+        }}
         .positive {{ color: #00B386; font-weight: bold; }}
         .negative {{ color: #dc3545; font-weight: bold; }}
-        .opportunity-card {{ background-color: #f9f9f9; padding: 20px; margin: 15px 0; border-left: 4px solid #00B386; border-radius: 5px; }}
-        .opportunity-card h3 {{ margin: 0 0 10px 0; color: #1A1A2E; font-size: 18px; }}
-        .opportunity-card .ticker {{ font-size: 20px; font-weight: bold; color: #00B386; }}
-        .footer {{ background-color: #1A1A2E; color: #999; padding: 20px; text-align: center; font-size: 12px; }}
-        .footer .timestamp {{ color: #00B386; }}
+        .opportunity-card {{
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            padding: 24px;
+            margin: 16px 0;
+            border-left: 5px solid #f59e0b;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(245, 158, 11, 0.15);
+        }}
+        .opportunity-card h3 {{
+            margin: 0 0 12px 0;
+            color: #1a202c;
+            font-size: 17px;
+            font-weight: 700;
+        }}
+        .opportunity-card .ticker {{
+            font-size: 20px;
+            font-weight: 800;
+            color: #d97706;
+            letter-spacing: 0.5px;
+        }}
+        .opportunity-card p {{
+            margin: 8px 0;
+            line-height: 1.6;
+            color: #4a5568;
+        }}
+        .footer {{
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            color: #a0aec0;
+            padding: 28px;
+            text-align: center;
+            font-size: 13px;
+            line-height: 1.8;
+        }}
+        .footer .timestamp {{
+            color: #667eea;
+            font-weight: 600;
+        }}
+        .footer strong {{ color: #e2e8f0; }}
 
         /* Mobile responsive */
-        @media only screen and (max-width: 768px) {{
-            body {{ font-size: 16px; padding: 10px; }}
-            .section {{ padding: 20px 15px; }}
-            .header h1 {{ font-size: 22px; }}
-            table {{ font-size: 13px; }}
-            th, td {{ padding: 10px 6px; }}
-            .buy-more, .hold, .sell, .watch {{ font-size: 12px; padding: 6px 10px; }}
+        @media only screen and (max-width: 600px) {{
+            body {{ padding: 12px; }}
+            .container {{ border-radius: 12px; }}
+            .header {{ padding: 32px 20px; }}
+            .header h1 {{ font-size: 20px; }}
+            .section {{ padding: 24px 16px; }}
+            .section h2 {{ font-size: 18px; }}
+            .stock-card {{ padding: 16px; }}
+            .stock-ticker {{ font-size: 17px; }}
+            .stock-price, .stock-change {{ font-size: 15px; }}
+            .macro-context {{ padding: 18px; font-size: 14px; }}
+            .opportunity-card {{ padding: 18px; }}
         }}
     </style>
 </head>
@@ -634,25 +816,11 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         <div class="section">
             <h2>📊 Your Holdings</h2>
             <div class="rec-summary">{rec_summary}</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Ticker</th>
-                        <th>Price</th>
-                        <th>Change</th>
-                        <th>Rec</th>
-                        <th>Conf</th>
-                        <th>Reason</th>
-                        <th>Risk</th>
-                        <th>Reddit</th>
-                    </tr>
-                </thead>
-                <tbody>
 """
 
     for h in holdings:
         rec_class = ''
-        if 'BUY MORE' in h['recommendation'].upper():
+        if 'BUY MORE' in h['recommendation'].upper() or 'BUY' in h['recommendation'].upper():
             rec_class = 'buy-more'
         elif 'SELL' in h['recommendation'].upper():
             rec_class = 'sell'
@@ -672,21 +840,23 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             change_str = "N/A"
 
         html += f"""
-                    <tr>
-                        <td><strong>{h['ticker']}</strong></td>
-                        <td>{price_str}</td>
-                        <td class="{change_class}">{change_str}</td>
-                        <td><span class="{rec_class}">{h['recommendation']}</span></td>
-                        <td>{h['confidence']}</td>
-                        <td>{h['reason']}</td>
-                        <td>{h['risk']}</td>
-                        <td>{h['reddit']}</td>
-                    </tr>
+            <div class="stock-card">
+                <div class="stock-header">
+                    <span class="stock-ticker">{h['ticker']}</span>
+                    <span class="stock-price">{price_str}</span>
+                    <span class="stock-change {change_class}">{change_str}</span>
+                </div>
+                <div class="stock-rec-line">
+                    <span class="{rec_class}">{h['recommendation']}</span>
+                    <span style="color: #666; font-size: 13px; margin-left: 8px;">{h['confidence']} confidence</span>
+                </div>
+                <div class="stock-detail"><strong>Reason:</strong> {h['reason']}</div>
+                <div class="stock-detail"><strong>Risk:</strong> {h['risk']}</div>
+                <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>Reddit:</strong> {h['reddit']}</div>
+            </div>
 """
 
     html += """
-                </tbody>
-            </table>
         </div>
 """
 
