@@ -357,7 +357,7 @@ HOLDINGS DATA:
 For each stock give:
 - RECOMMENDATION: BUY MORE / HOLD / SELL / WATCH
 - CONFIDENCE: HIGH / MEDIUM / LOW
-- REASON: one sentence, max 15 words, be specific
+- REASON: 1-2 sentences (max 30 words). Include specific catalyst, data point, or price level. Be concrete and actionable.
 - RISK: one key risk to watch right now
 
 Consider: price action, news, Reddit sentiment, geopolitical context. Be direct and opinionated. If something should be sold, say so clearly.
@@ -593,7 +593,7 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         }}
         .header {{
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            color: #ffffff;
             padding: 40px 30px;
             text-align: center;
         }}
@@ -603,6 +603,8 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             font-weight: 700;
             letter-spacing: -0.5px;
             line-height: 1.3;
+            color: #ffffff;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }}
         .section {{
             padding: 32px 24px;
@@ -696,8 +698,8 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         }}
 
         .buy-more {{
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
+            background: #d1fae5;
+            color: #065f46;
             font-weight: 700;
             padding: 8px 16px;
             border-radius: 8px;
@@ -705,11 +707,12 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+            border: 2px solid #10b981;
         }}
         .hold {{
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            color: white;
+            background: #fef3c7;
+            color: #78350f;
             font-weight: 700;
             padding: 8px 16px;
             border-radius: 8px;
@@ -717,11 +720,12 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+            border: 2px solid #f59e0b;
         }}
         .sell {{
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            color: white;
+            background: #fee2e2;
+            color: #991b1b;
             font-weight: 700;
             padding: 8px 16px;
             border-radius: 8px;
@@ -729,11 +733,12 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+            border: 2px solid #ef4444;
         }}
         .watch {{
-            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-            color: white;
+            background: #e0e7ff;
+            color: #3730a3;
             font-weight: 700;
             padding: 8px 16px;
             border-radius: 8px;
@@ -741,7 +746,8 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+            border: 2px solid #6366f1;
         }}
         .positive {{ color: #00B386; font-weight: bold; }}
         .negative {{ color: #dc3545; font-weight: bold; }}
@@ -866,13 +872,21 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             <h2>🔥 Opportunities</h2>
 """
         for opp in opportunities:
+            # Convert markdown **text** to HTML <strong>text</strong>
+            import re
+            why_today = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['why_today'])
+            company = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['company'])
+            upside = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['upside'])
+            risk = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['risk'])
+            exchange = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['exchange'])
+
             html += f"""
             <div class="opportunity-card">
                 <div class="ticker">{opp['ticker']}</div>
-                <h3>{opp['company']}</h3>
-                <p><strong>Why Today:</strong> {opp['why_today']}</p>
-                <p><strong>Upside:</strong> {opp['upside']} | <strong>Risk:</strong> {opp['risk']}</p>
-                <p><strong>Exchange:</strong> {opp['exchange']}</p>
+                <h3>{company}</h3>
+                <p><strong>Why Today:</strong> {why_today}</p>
+                <p><strong>Upside:</strong> {upside} | <strong>Risk:</strong> {risk}</p>
+                <p><strong>Exchange:</strong> {exchange}</p>
             </div>
 """
         html += """
