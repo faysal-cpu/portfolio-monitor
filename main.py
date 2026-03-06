@@ -149,13 +149,13 @@ def get_macro_context(date_str: str) -> str:
 
 
 def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
-    """Fetch price data from Alpha Vantage as fallback (for Canadian TSX stocks)"""
+    """Fetch price data from Alpha Vantage as fallback (for Canadian TSX/CSE stocks)"""
     if not ALPHA_VANTAGE_API_KEY:
         return None
 
     try:
-        # Try with .TO suffix for Canadian stocks
-        symbols_to_try = [f"{ticker}.TO", ticker]
+        # Try Canadian exchange suffixes: .TO (TSX), .V (Venture), .CN (CSE)
+        symbols_to_try = [f"{ticker}.TO", f"{ticker}.V", f"{ticker}.CN", ticker]
 
         for symbol in symbols_to_try:
             try:
