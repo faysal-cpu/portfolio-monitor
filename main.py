@@ -130,9 +130,18 @@ def get_macro_context(date_str: str) -> str:
             tools=[{"type": "web_search_20250305", "name": "web_search"}]
         )
 
-        response = message.content[0].text
-        logger.info("Successfully fetched macro context from Claude with web search")
-        return response
+        # Extract text from response (handles tool use)
+        response_text = ""
+        for block in message.content:
+            if hasattr(block, 'text'):
+                response_text += block.text
+
+        if response_text:
+            logger.info("Successfully fetched macro context from Claude with web search")
+            return response_text
+        else:
+            logger.warning("No text found in macro context response")
+            return "• Market context unavailable\n• Please check logs for errors\n• Analysis continues with available data"
 
     except Exception as e:
         logger.error(f"Error fetching macro context: {e}")
