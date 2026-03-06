@@ -125,7 +125,7 @@ def get_macro_context(date_str: str) -> str:
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=500,
+            max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
             tools=[{"type": "web_search_20250305", "name": "web_search"}]
         )
