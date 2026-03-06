@@ -531,13 +531,27 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
 
     lines = opportunities.strip().split('\n')
 
+    # Placeholder patterns to filter out
+    placeholder_patterns = ['TICKER', 'COMPANY', 'WHY TODAY', 'UPSIDE', 'RISK', 'EXCHANGE']
+
     for line in lines:
         if '|' in line:
             parts = line.split('|')
             if len(parts) >= 6:
+                ticker = parts[0].strip()
+                company = parts[1].strip()
+
+                # Skip if ticker or company matches placeholder patterns
+                if ticker.upper() in placeholder_patterns or company.upper() in placeholder_patterns:
+                    continue
+
+                # Skip if ticker contains placeholder-like text
+                if any(placeholder in ticker.upper() for placeholder in placeholder_patterns):
+                    continue
+
                 parsed.append({
-                    'ticker': parts[0].strip(),
-                    'company': parts[1].strip(),
+                    'ticker': ticker,
+                    'company': company,
                     'why_today': parts[2].strip(),
                     'upside': parts[3].strip(),
                     'risk': parts[4].strip(),
@@ -592,8 +606,9 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }}
         .header {{
+            background-color: #5a4d8a;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #ffffff;
+            color: #ffffff !important;
             padding: 40px 30px;
             text-align: center;
         }}
@@ -603,7 +618,7 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             font-weight: 700;
             letter-spacing: -0.5px;
             line-height: 1.3;
-            color: #ffffff;
+            color: #ffffff !important;
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }}
         .section {{
@@ -815,7 +830,21 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         <div class="section">
             <h2>🌍 Macro Context</h2>
             <div class="macro-context">
-                {macro_context.replace(chr(10), '<br>')}
+"""
+
+    # Process macro context: strip intro, convert markdown, add line breaks
+    import re
+    processed_macro = macro_context
+    # Strip everything before the first bullet point
+    if '•' in processed_macro:
+        processed_macro = '•' + processed_macro.split('•', 1)[1]
+    # Convert **text** to <strong>text</strong>
+    processed_macro = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', processed_macro)
+    # Convert newlines to <br>
+    processed_macro = processed_macro.replace(chr(10), '<br>')
+
+    html += f"""
+                {processed_macro}
             </div>
         </div>
 
