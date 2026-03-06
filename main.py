@@ -54,6 +54,7 @@ logger.info(f".env file loaded: {env_loaded}")
 
 # API Clients
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
 REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
 REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET')
 REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT')
@@ -65,6 +66,7 @@ EMAIL_FROM = os.getenv('EMAIL_FROM')
 # Debug: Show what was loaded
 logger.info("Loaded credentials:")
 logger.info(f"  FINNHUB_API_KEY: {FINNHUB_API_KEY[:20] + '...' if FINNHUB_API_KEY else '✗ MISSING'}")
+logger.info(f"  ALPHA_VANTAGE_API_KEY: {ALPHA_VANTAGE_API_KEY[:15] + '...' if ALPHA_VANTAGE_API_KEY else '✗ MISSING'}")
 logger.info(f"  REDDIT_CLIENT_ID: {REDDIT_CLIENT_ID[:15] + '...' if REDDIT_CLIENT_ID else '✗ MISSING'}")
 logger.info(f"  REDDIT_CLIENT_SECRET: {REDDIT_CLIENT_SECRET[:15] + '...' if REDDIT_CLIENT_SECRET else '✗ MISSING'}")
 logger.info(f"  REDDIT_USER_AGENT: {REDDIT_USER_AGENT if REDDIT_USER_AGENT else '✗ MISSING'}")
@@ -119,21 +121,63 @@ def get_macro_context(date_str: str) -> str:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-        prompt = f"""Today is {date_str}. In 3 bullet points, give the most important macro and geopolitical factors a Canadian retail investor should know TODAY that could affect North American and global markets. Be specific — mention actual events, not generic risks."""
+        prompt = f"""Today is {date_str}. Search for today's most important market news and macro developments. In 3 bullet points, give the most important macro and geopolitical factors a Canadian retail investor should know TODAY that could affect North American and global markets. Be specific — mention actual events, not generic risks."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=500,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{"type": "web_search_20250305", "name": "web_search"}]
         )
 
         response = message.content[0].text
-        logger.info("Successfully fetched macro context from Claude")
+        logger.info("Successfully fetched macro context from Claude with web search")
         return response
 
     except Exception as e:
         logger.error(f"Error fetching macro context: {e}")
         return "• Market context unavailable\n• Please check logs for errors\n• Analysis continues with available data"
+
+
+def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
+    """Fetch price data from Alpha Vantage as fallback (for Canadian TSX stocks)"""
+    if not ALPHA_VANTAGE_API_KEY:
+        return None
+
+    try:
+        # Try with .TO suffix for Canadian stocks
+        symbols_to_try = [f"{ticker}.TO", ticker]
+
+        for symbol in symbols_to_try:
+            try:
+                url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={ALPHA_VANTAGE_API_KEY}"
+                response = requests.get(url, timeout=10)
+                data = response.json()
+
+                if 'Global Quote' in data and data['Global Quote']:
+                    quote = data['Global Quote']
+                    price = float(quote.get('05. price', 0))
+                    change_percent = float(quote.get('10. change percent', '0').rstrip('%'))
+
+                    if price > 0:  # Valid data found
+                        logger.info(f"✓ Alpha Vantage success for {ticker} (as {symbol}): ${price:.2f}")
+                        return {
+                            'ticker': ticker,
+                            'price': price,
+                            'change_percent': change_percent,
+                            'headlines': [],
+                            'source': 'Alpha Vantage'
+                        }
+
+                time.sleep(12)  # Alpha Vantage free tier: 5 calls/min
+            except Exception as e:
+                logger.warning(f"Alpha Vantage attempt failed for {symbol}: {e}")
+                continue
+
+        return None
+    except Exception as e:
+        logger.error(f"Alpha Vantage error for {ticker}: {e}")
+        return None
 
 
 def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
@@ -159,12 +203,33 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
 
         time.sleep(0.1)  # Rate limiting
 
-        return {
-            'ticker': ticker,
-            'price': current_price,
-            'change_percent': change_percent,
-            'headlines': headlines
-        }
+        # Check if we got valid price data
+        if current_price > 0:
+            return {
+                'ticker': ticker,
+                'price': current_price,
+                'change_percent': change_percent,
+                'headlines': headlines,
+                'source': 'Finnhub'
+            }
+        else:
+            # No price data from Finnhub, try Alpha Vantage
+            logger.warning(f"No price data from Finnhub for {ticker}, trying Alpha Vantage...")
+            av_data = fetch_alpha_vantage_data(ticker)
+            if av_data:
+                # Keep Finnhub news if available
+                av_data['headlines'] = headlines
+                return av_data
+            else:
+                # Both APIs failed, return ticker with N/A data
+                logger.warning(f"Both APIs failed for {ticker}, including with N/A data")
+                return {
+                    'ticker': ticker,
+                    'price': None,
+                    'change_percent': None,
+                    'headlines': headlines,
+                    'source': 'N/A'
+                }
 
     except Exception as e:
         logger.error(f"Error fetching data for {ticker}: {e}")
@@ -174,15 +239,31 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             time.sleep(2)
             try:
                 quote = finnhub_client.quote(ticker)
-                return {
-                    'ticker': ticker,
-                    'price': quote.get('c', 0),
-                    'change_percent': quote.get('dp', 0),
-                    'headlines': []
-                }
+                if quote.get('c', 0) > 0:
+                    return {
+                        'ticker': ticker,
+                        'price': quote.get('c', 0),
+                        'change_percent': quote.get('dp', 0),
+                        'headlines': [],
+                        'source': 'Finnhub'
+                    }
             except:
-                return None
-        return None
+                pass
+
+        # Try Alpha Vantage as fallback
+        logger.warning(f"Finnhub failed for {ticker}, trying Alpha Vantage...")
+        av_data = fetch_alpha_vantage_data(ticker)
+        if av_data:
+            return av_data
+
+        # Both failed, return N/A data
+        return {
+            'ticker': ticker,
+            'price': None,
+            'change_percent': None,
+            'headlines': [],
+            'source': 'N/A'
+        }
 
 
 def get_reddit_sentiment(ticker: str, reddit_client) -> Tuple[int, str]:
@@ -238,8 +319,21 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
         holdings_text = ""
         for data in holdings_data:
             holdings_text += f"\n{data['ticker']}:\n"
-            holdings_text += f"  Price: ${(data.get('price') or 0):.2f}\n"
-            holdings_text += f"  Day Change: {(data.get('change_percent') or 0):.2f}%\n"
+
+            # Handle None values for price
+            price = data.get('price')
+            if price is not None:
+                holdings_text += f"  Price: ${price:.2f}\n"
+            else:
+                holdings_text += f"  Price: N/A (data unavailable)\n"
+
+            # Handle None values for change_percent
+            change = data.get('change_percent')
+            if change is not None:
+                holdings_text += f"  Day Change: {change:.2f}%\n"
+            else:
+                holdings_text += f"  Day Change: N/A\n"
+
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
             holdings_text += f"  Reddit: {data.get('reddit_sentiment', 'N/A')}\n"
 
@@ -338,7 +432,13 @@ def find_opportunities(trending_data: List[Dict]) -> str:
         # Format trending data
         trending_text = ""
         for data in trending_data:
-            trending_text += f"\n{data['ticker']}: ${(data.get('price') or 0):.2f} ({(data.get('change_percent') or 0):+.2f}%)\n"
+            price = data.get('price')
+            change = data.get('change_percent')
+
+            price_str = f"${price:.2f}" if price is not None else "N/A"
+            change_str = f"({change:+.2f}%)" if change is not None else "(N/A)"
+
+            trending_text += f"\n{data['ticker']}: {price_str} {change_str}\n"
             if data.get('headlines'):
                 trending_text += f"  News: {'; '.join(data['headlines'][:2])}\n"
 
@@ -441,34 +541,72 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
 def create_html_email(macro_context: str, holdings: List[Dict], opportunities: List[Dict], date_str: str) -> Tuple[str, str]:
     """Create HTML and plain text email content"""
 
+    # Count recommendations by type
+    rec_counts = {'BUY MORE': 0, 'HOLD': 0, 'SELL': 0, 'WATCH': 0}
+    for h in holdings:
+        rec = h['recommendation'].upper()
+        if 'BUY MORE' in rec or 'BUY' in rec:
+            rec_counts['BUY MORE'] += 1
+        elif 'SELL' in rec:
+            rec_counts['SELL'] += 1
+        elif 'WATCH' in rec:
+            rec_counts['WATCH'] += 1
+        else:
+            rec_counts['HOLD'] += 1
+
+    rec_summary = f"{rec_counts['BUY MORE']} BUY · {rec_counts['HOLD']} HOLD · {rec_counts['SELL']} SELL · {rec_counts['WATCH']} WATCH"
+
     # HTML Email
     html = f"""
 <!DOCTYPE html>
 <html>
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }}
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; font-size: 15px; }}
         .container {{ max-width: 1200px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
         .header {{ background-color: #1A1A2E; color: white; padding: 30px; text-align: center; }}
         .header h1 {{ margin: 0; font-size: 28px; }}
         .section {{ padding: 30px; border-bottom: 1px solid #e0e0e0; }}
-        .section h2 {{ color: #1A1A2E; margin-top: 0; border-left: 4px solid #00B386; padding-left: 15px; }}
-        .macro-context {{ background-color: #f9f9f9; padding: 20px; border-radius: 5px; line-height: 1.8; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-        th {{ background-color: #1A1A2E; color: white; padding: 12px; text-align: left; font-weight: 600; }}
-        td {{ padding: 12px; border-bottom: 1px solid #e0e0e0; }}
+        .section h2 {{ color: #1A1A2E; margin-top: 0; border-left: 4px solid #00B386; padding-left: 15px; font-size: 22px; }}
+        .macro-context {{ background-color: #f9f9f9; padding: 20px; border-radius: 5px; line-height: 1.8; font-size: 15px; }}
+        .rec-summary {{ background-color: #f0f0f0; padding: 15px; border-radius: 5px; text-align: center; font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #1A1A2E; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; table-layout: fixed; }}
+        th {{ background-color: #1A1A2E; color: white; padding: 14px 10px; text-align: left; font-weight: 600; font-size: 13px; }}
+        td {{ padding: 14px 10px; border-bottom: 1px solid #e0e0e0; font-size: 14px; vertical-align: top; }}
         tr:hover {{ background-color: #f5f5f5; }}
-        .buy-more {{ background-color: #d4edda; color: #155724; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
-        .hold {{ background-color: #e2e3e5; color: #383d41; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
-        .sell {{ background-color: #f8d7da; color: #721c24; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
-        .watch {{ background-color: #fff3cd; color: #856404; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
+
+        /* Column width optimization for mobile */
+        th:nth-child(1), td:nth-child(1) {{ width: 7%; font-weight: bold; }} /* Ticker */
+        th:nth-child(2), td:nth-child(2) {{ width: 8%; }} /* Price */
+        th:nth-child(3), td:nth-child(3) {{ width: 8%; }} /* Change */
+        th:nth-child(4), td:nth-child(4) {{ width: 11%; }} /* Recommendation */
+        th:nth-child(5), td:nth-child(5) {{ width: 8%; }} /* Confidence */
+        th:nth-child(6), td:nth-child(6) {{ width: 28%; }} /* Reason - WIDER */
+        th:nth-child(7), td:nth-child(7) {{ width: 22%; }} /* Risk - WIDER */
+        th:nth-child(8), td:nth-child(8) {{ width: 8%; }} /* Reddit */
+
+        .buy-more {{ background-color: #d4edda; color: #155724; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
+        .hold {{ background-color: #e2e3e5; color: #383d41; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
+        .sell {{ background-color: #f8d7da; color: #721c24; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
+        .watch {{ background-color: #fff3cd; color: #856404; font-weight: 800; padding: 8px 12px; border-radius: 4px; display: inline-block; font-size: 13px; white-space: nowrap; }}
         .positive {{ color: #00B386; font-weight: bold; }}
         .negative {{ color: #dc3545; font-weight: bold; }}
         .opportunity-card {{ background-color: #f9f9f9; padding: 20px; margin: 15px 0; border-left: 4px solid #00B386; border-radius: 5px; }}
-        .opportunity-card h3 {{ margin: 0 0 10px 0; color: #1A1A2E; }}
+        .opportunity-card h3 {{ margin: 0 0 10px 0; color: #1A1A2E; font-size: 18px; }}
         .opportunity-card .ticker {{ font-size: 20px; font-weight: bold; color: #00B386; }}
         .footer {{ background-color: #1A1A2E; color: #999; padding: 20px; text-align: center; font-size: 12px; }}
         .footer .timestamp {{ color: #00B386; }}
+
+        /* Mobile responsive */
+        @media only screen and (max-width: 768px) {{
+            body {{ font-size: 16px; padding: 10px; }}
+            .section {{ padding: 20px 15px; }}
+            .header h1 {{ font-size: 22px; }}
+            table {{ font-size: 13px; }}
+            th, td {{ padding: 10px 6px; }}
+            .buy-more, .hold, .sell, .watch {{ font-size: 12px; padding: 6px 10px; }}
+        }}
     </style>
 </head>
 <body>
@@ -486,14 +624,15 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 
         <div class="section">
             <h2>📊 Your Holdings</h2>
+            <div class="rec-summary">{rec_summary}</div>
             <table>
                 <thead>
                     <tr>
                         <th>Ticker</th>
                         <th>Price</th>
-                        <th>Day Change</th>
-                        <th>Recommendation</th>
-                        <th>Confidence</th>
+                        <th>Change</th>
+                        <th>Rec</th>
+                        <th>Conf</th>
                         <th>Reason</th>
                         <th>Risk</th>
                         <th>Reddit</th>
@@ -513,13 +652,21 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         else:
             rec_class = 'hold'
 
-        change_class = 'positive' if (h.get('change_percent') or 0) >= 0 else 'negative'
+        # Handle None values for price and change_percent
+        price_str = f"${h.get('price'):.2f}" if h.get('price') is not None else "N/A"
+        change_val = h.get('change_percent')
+        if change_val is not None:
+            change_class = 'positive' if change_val >= 0 else 'negative'
+            change_str = f"{change_val:+.2f}%"
+        else:
+            change_class = ''
+            change_str = "N/A"
 
         html += f"""
                     <tr>
                         <td><strong>{h['ticker']}</strong></td>
-                        <td>${(h.get('price') or 0):.2f}</td>
-                        <td class="{change_class}">{(h.get('change_percent') or 0):+.2f}%</td>
+                        <td>{price_str}</td>
+                        <td class="{change_class}">{change_str}</td>
                         <td><span class="{rec_class}">{h['recommendation']}</span></td>
                         <td>{h['confidence']}</td>
                         <td>{h['reason']}</td>
@@ -574,7 +721,11 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 === YOUR HOLDINGS ===
 """
     for h in holdings:
-        plain += f"\n{h['ticker']}: ${(h.get('price') or 0):.2f} ({(h.get('change_percent') or 0):+.2f}%)\n"
+        price_str = f"${h.get('price'):.2f}" if h.get('price') is not None else "N/A"
+        change_val = h.get('change_percent')
+        change_str = f"({change_val:+.2f}%)" if change_val is not None else "(N/A)"
+
+        plain += f"\n{h['ticker']}: {price_str} {change_str}\n"
         plain += f"  Recommendation: {h.get('recommendation', 'N/A')} ({h.get('confidence', 'N/A')} confidence)\n"
         plain += f"  Reason: {h.get('reason', 'N/A')}\n"
         plain += f"  Risk: {h.get('risk', 'N/A')}\n"
