@@ -380,15 +380,34 @@ class CSVParser:
 
     @staticmethod
     def _is_payment_or_transfer(description: str) -> bool:
-        """Check if transaction is a payment or transfer"""
+        """Check if transaction is a payment, transfer, or investment (not real spending)"""
         desc_lower = description.lower()
-        keywords = [
+        desc_upper = description.upper()
+
+        # Payment/transfer keywords
+        payment_keywords = [
             'royal bank', 'rogers pay', 'amex', 'td payment',
             'internet transfer', 'e-transfer', 'etransfer',
             'payment', 'thank you', 'pymt', 'transfer', 'interac',
             'credit card payment', 'autopay', 'pre-authorized'
         ]
-        return any(keyword in desc_lower for keyword in keywords)
+
+        # Wealthsimple investment keywords (case-sensitive check)
+        investment_keywords = [
+            'Purchase of', 'Trading fee', 'Management fee',
+            'Withdrawal', 'INT ', 'E_TRFIN', 'E_TRFOUT',
+            'DIV', 'BUY', 'SELL'
+        ]
+
+        # Check payment keywords (case-insensitive)
+        if any(keyword in desc_lower for keyword in payment_keywords):
+            return True
+
+        # Check investment keywords (check both exact case and in description)
+        if any(keyword in description for keyword in investment_keywords):
+            return True
+
+        return False
 
     @staticmethod
     def _clean_merchant_name(description: str) -> str:
@@ -484,33 +503,41 @@ class ClaudeCategorizer:
                 'amount': tx.amount
             })
 
-        prompt = f"""Categorize these transactions into one of these categories:
-{', '.join(CATEGORIES)}
+        prompt = f"""You are a financial categorization assistant. Categorize each transaction into EXACTLY ONE of these categories (use the exact spelling):
 
-Also identify which transactions are likely recurring subscriptions.
+Food & Dining
+Transport
+Bills & Utilities
+Entertainment
+Health
+Shopping
+Other
 
-Transactions:
+Also identify which transactions are recurring subscriptions.
+
+Transactions to categorize:
 {json.dumps(tx_list, indent=2)}
 
-Return a JSON object with this structure:
+IMPORTANT: Return ONLY a valid JSON object with this EXACT structure (no other text):
 {{
   "categorized": [
     {{"id": 0, "category": "Food & Dining", "is_subscription": false}},
-    ...
+    {{"id": 1, "category": "Transport", "is_subscription": false}}
   ]
 }}
 
-Be smart about categorization:
-- Restaurant names, cafes, food delivery = Food & Dining
-- Uber, Lyft, gas stations, parking = Transport
-- Netflix, Spotify, gym memberships = Entertainment (and likely subscriptions)
-- Phone bills, electricity, internet = Bills & Utilities (likely subscriptions)
-- Amazon, clothing stores, electronics = Shopping
-- Pharmacies, doctors, dental = Health
-- Everything else = Other
+Categorization rules (BE SPECIFIC):
+- "Food & Dining": Restaurants, cafes, bars, food delivery (UberEats, DoorDash, SkipTheDishes), grocery stores, bakeries, fast food
+- "Transport": Uber, Lyft, taxis, gas stations, parking, public transit, car rental, automotive
+- "Bills & Utilities": Phone bills, internet, electricity, water, gas, cell phone, cable, insurance
+- "Entertainment": Netflix, Spotify, Apple Music, Disney+, gym memberships, movies, games, sports, concerts
+- "Health": Pharmacies, doctors, dentists, hospitals, medical supplies, health insurance, prescriptions
+- "Shopping": Amazon, clothing stores, electronics, home goods, department stores, online shopping
+- "Other": Anything that doesn't clearly fit the above categories
 
-Only mark as subscription if it's clearly a recurring service (streaming, subscriptions, memberships, utilities, etc.)
-"""
+Subscription detection: Mark is_subscription=true ONLY for: streaming services (Netflix, Spotify, etc), gym memberships, phone/internet bills, insurance. NOT for one-time purchases.
+
+Return the JSON now:"""
 
         try:
             message = self.client.messages.create(
@@ -520,20 +547,34 @@ Only mark as subscription if it's clearly a recurring service (streaming, subscr
             )
 
             response_text = message.content[0].text
+            logger.info(f"Claude response preview: {response_text[:200]}...")
 
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())
                 categorized = result.get('categorized', [])
 
+                logger.info(f"Successfully parsed {len(categorized)} categorizations from Claude")
+
                 for item in categorized:
                     tx_id = item.get('id')
                     if tx_id is not None and tx_id < len(transactions):
-                        transactions[tx_id].category = item.get('category', 'Other')
+                        category = item.get('category', 'Other')
+                        # Validate category is in allowed list
+                        if category not in CATEGORIES:
+                            logger.warning(f"Invalid category '{category}' from Claude, using 'Other'")
+                            category = 'Other'
+
+                        transactions[tx_id].category = category
                         transactions[tx_id].is_subscription = item.get('is_subscription', False)
+            else:
+                logger.error("Could not extract JSON from Claude response")
+                logger.error(f"Full response: {response_text}")
 
         except Exception as e:
             logger.error(f"Error categorizing with Claude: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             for tx in transactions:
                 if not tx.category:
                     tx.category = 'Other'
@@ -977,6 +1018,11 @@ def run_spending_analysis():
 
                 if not source:
                     logger.warning(f"  ✗ Could not detect bank source for {filename}")
+                    logger.warning(f"  → Filename: {filename}")
+                    logger.warning(f"  → Headers: {headers}")
+                    logger.warning(f"  → First 3 rows for debugging:")
+                    for i, row in enumerate(rows[:3]):
+                        logger.warning(f"      Row {i+1}: {dict(row)}")
                     continue
 
                 logger.info(f"  Detected source: {source}")
