@@ -445,19 +445,28 @@ class CSVParser:
             'credit card payment', 'autopay', 'pre-authorized'
         ]
 
-        # Wealthsimple investment keywords (case-sensitive check)
+        # Investment keywords (comprehensive list)
         investment_keywords = [
-            'Purchase of', 'Trading fee', 'Management fee',
-            'Withdrawal', 'INT ', 'E_TRFIN', 'E_TRFOUT',
-            'DIV', 'BUY', 'SELL'
+            # Direct investment terms
+            'purchase of', 'trading fee', 'management fee',
+            'withdrawal', 'int ', 'e_trfin', 'e_trfout',
+            'div', 'buy', 'sell', 'dividend',
+            # Asset types
+            'bond', 'bonds', 'equity', 'equities', 'stock', 'stocks',
+            'etf', 'index', 'fund', 'mutual fund', 'shares',
+            # Specific funds/companies
+            'vanguard', 'bmo', 'ishares', 'blackrock', 'fidelity',
+            'corporate bond', 'aggregate bond', 'treasury',
+            # Investment accounts
+            'tfsa', 'rrsp', 'contribution', 'redemption'
         ]
 
         # Check payment keywords (case-insensitive)
         if any(keyword in desc_lower for keyword in payment_keywords):
             return True
 
-        # Check investment keywords (check both exact case and in description)
-        if any(keyword in description for keyword in investment_keywords):
+        # Check investment keywords (case-insensitive)
+        if any(keyword in desc_lower for keyword in investment_keywords):
             return True
 
         return False
