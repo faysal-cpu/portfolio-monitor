@@ -150,6 +150,11 @@ class CSVParser:
 
         # Use HEADERS ONLY for all other banks
 
+        # Amex: Exactly Date, Date Processed, Description, Amount (activity*.csv files)
+        # Check this FIRST before Rogers since some activity files might have similar headers
+        if all(h in headers_lower for h in ['date', 'date processed', 'description', 'amount']):
+            return 'amex'
+
         # Rogers: Has Merchant Name, Activity Type, Posted Date
         if 'merchant name' in headers_lower and 'activity type' in headers_lower and 'posted date' in headers_lower:
             return 'rogers'
@@ -161,10 +166,6 @@ class CSVParser:
         # Wealthsimple Chequing: date, transaction, description, amount, balance, currency
         if all(h in headers_lower for h in ['date', 'transaction', 'description', 'amount', 'balance', 'currency']):
             return 'wealthsimple'
-
-        # Amex: Date, Date Processed, Description, Amount
-        if all(h in headers_lower for h in ['date', 'date processed', 'description', 'amount']):
-            return 'amex'
 
         return None
 
@@ -265,7 +266,7 @@ class CSVParser:
     @staticmethod
     def parse_amex(rows: List[Dict]) -> Tuple[List[Transaction], int]:
         """Parse American Express CSV format
-        Headers: Date, Date Processed, Description, Amount
+        Headers: Date (format: 07 Aug 2025), Date Processed, Description, Amount
         Positive amount = spending, negative = credits/refunds
         """
         transactions = []
@@ -286,15 +287,18 @@ class CSVParser:
 
                 amount = CSVParser._parse_amount(amount_str)
 
-                # Positive = spending, negative = credits/refunds (skip)
+                # Skip negative amounts (refunds/credits)
                 if amount <= 0:
-                    continue
-
-                # Skip membership fee installments (unless it's a real charge)
-                if 'MEMBERSHIP FEE INSTALLMENT' in description.upper() and amount < 0:
                     skipped += 1
                     continue
 
+                # Skip Amex payments
+                desc_upper = description.upper()
+                if 'PAYMENT RECEIVED' in desc_upper or 'PAYMENT THANK YOU' in desc_upper:
+                    skipped += 1
+                    continue
+
+                # Skip other payments and transfers
                 if CSVParser._is_payment_or_transfer(description):
                     skipped += 1
                     continue
@@ -414,6 +418,7 @@ class CSVParser:
     def _parse_date(date_str: str) -> Optional[datetime]:
         """Try multiple date formats"""
         date_formats = [
+            '%d %b %Y',     # Amex format: 07 Aug 2025
             '%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d',
             '%b %d, %Y', '%B %d, %Y', '%m-%d-%Y', '%d-%m-%Y'
         ]
@@ -773,75 +778,71 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
-            background: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
             color: #ffffff;
-            padding: 0;
-            line-height: 1.5;
+            padding: 20px;
+            line-height: 1.6;
             -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }}
 
         .container {{
-            max-width: 480px;
+            max-width: 600px;
             margin: 0 auto;
-            background: #000000;
-            padding: 48px 24px;
+            background: #0a0a0f;
         }}
 
-        .divider {{
-            height: 1px;
-            background: rgba(255, 255, 255, 0.08);
-            margin: 32px 0;
-        }}
-
-        .dot {{
-            display: inline-block;
-            width: 4px;
-            height: 4px;
-            border-radius: 50%;
-            margin-right: 12px;
+        .card {{
+            background: #13131a;
+            border: 1px solid #1e1e2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
         }}
 
         @media (prefers-color-scheme: light) {{
-            body {{ background: #F5F5F7; color: #1d1d1f; }}
-            .container {{ background: #F5F5F7; }}
-            .divider {{ background: rgba(0, 0, 0, 0.08); }}
+            body {{ background: #f0f0f5 !important; color: #1a1a1f !important; }}
+            .container {{ background: #f0f0f5 !important; }}
+            .card {{ background: #ffffff !important; border-color: #e0e0e8 !important; }}
         }}
 
-        @media only screen and (max-width: 480px) {{
-            .container {{ padding: 32px 20px; }}
-            .hero-amount {{ font-size: 52px !important; }}
+        @media only screen and (max-width: 600px) {{
+            body {{ padding: 12px; }}
+            .card {{ padding: 16px; }}
         }}
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Minimal header -->
-        <div style="text-align: center; margin-bottom: 48px;">
-            <div style="font-size: 11px; font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); margin-bottom: 16px;">{month_only} SPENDING</div>
-            <div class="hero-amount" style="font-size: 64px; font-weight: 300; line-height: 1; margin-bottom: 12px;">${total_spent:,.0f}</div>
-            <div style="font-size: 11px; font-weight: 400; color: rgba(255, 255, 255, 0.35);">YTD ${ytd_total:,.0f}</div>
+        <!-- Header gradient banner -->
+        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #13131a 100%); border-radius: 12px; padding: 32px 24px; text-align: center; margin-bottom: 20px; border-bottom: 3px solid #00d4aa;">
+            <div style="font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #00d4aa; margin-bottom: 16px;">{month_name}</div>
+            <div style="font-size: 52px; font-weight: 700; line-height: 1.1; color: #ffffff; margin-bottom: 12px;">${total_spent:,.2f}</div>
+            <div style="font-size: 14px; font-weight: 500; color: #8b8b9a;">Year to Date: ${ytd_total:,.2f}</div>
         </div>"""
 
-    # Alert - minimal single line
+    # Alert banner - colored pill
     if biggest_change_category and biggest_change_amount != 0:
         arrow = "↑" if biggest_change_amount > 0 else "↓"
-        alert_color = "#FF6B6B" if biggest_change_amount > 0 else "#00C9A7"
+        alert_bg = "rgba(239, 68, 68, 0.15)" if biggest_change_amount > 0 else "rgba(16, 185, 129, 0.15)"
+        alert_border = "#ef4444" if biggest_change_amount > 0 else "#10b981"
+        alert_text = "#ef4444" if biggest_change_amount > 0 else "#10b981"
+        alert_label = "LARGEST INCREASE" if biggest_change_amount > 0 else "LARGEST DECREASE"
 
         html += f"""
-        <div style="text-align: center; margin-bottom: 48px;">
-            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {alert_color}; margin-right: 8px; vertical-align: middle;"></span>
-            <span style="font-size: 12px; font-weight: 400; color: rgba(255, 255, 255, 0.45);">{arrow} {biggest_change_category} {biggest_change_percent:+.0f}% this month</span>
+        <div style="background: {alert_bg}; border: 2px solid {alert_border}; border-radius: 16px; padding: 16px 20px; text-align: center; margin-bottom: 20px;">
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {alert_text}; margin-bottom: 6px;">{alert_label}</div>
+            <div style="font-size: 16px; font-weight: 600; color: #ffffff;">{biggest_change_category}: {arrow} ${abs(biggest_change_amount):,.2f} ({biggest_change_percent:+.1f}%)</div>
         </div>"""
 
-    # Categories - clean rows with colored dots
+    # Categories section
     html += """
-        <div class="divider"></div>"""
+        <div style="margin-bottom: 20px;">
+            <h2 style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Categories</h2>"""
 
-    for i, (category, amount) in enumerate(sorted_categories):
+    for category, amount in sorted_categories:
         percentage = (amount / total_spent * 100) if total_spent > 0 else 0
-        dot_color = category_colors.get(category, '#95A5A6')
+        border_color = category_colors.get(category, '#95A5A6')
 
         mom_badge = ""
         if prev_month_data:
@@ -850,113 +851,145 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                 cat_change = amount - prev_cat_amount
                 cat_change_percent = (cat_change / prev_cat_amount * 100)
                 arrow = "↑" if cat_change > 0 else "↓"
-                badge_color = "rgba(255, 107, 107, 0.2)" if cat_change > 0 else "rgba(0, 201, 167, 0.2)"
-                text_color = "#FF6B6B" if cat_change > 0 else "#00C9A7"
-                mom_badge = f'<span style="display: inline-block; padding: 2px 8px; background: {badge_color}; color: {text_color}; border-radius: 10px; font-size: 10px; font-weight: 500; margin-left: 8px;">{arrow}{abs(cat_change_percent):.0f}%</span>'
-
-        border_bottom = "" if i == len(sorted_categories) - 1 else "border-bottom: 1px solid rgba(255, 255, 255, 0.08);"
+                badge_bg = "rgba(239, 68, 68, 0.2)" if cat_change > 0 else "rgba(16, 185, 129, 0.2)"
+                badge_color = "#ef4444" if cat_change > 0 else "#10b981"
+                mom_badge = f'<div style="font-size: 13px; font-weight: 600; color: {badge_color}; margin-top: 4px;">{arrow} {abs(cat_change_percent):.0f}% vs last month</div>'
+            elif amount > 0:
+                mom_badge = '<div style="font-size: 13px; font-weight: 600; color: #00d4aa; margin-top: 4px;">NEW</div>'
 
         html += f"""
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 0; {border_bottom}">
-                <div style="display: flex; align-items: center; flex: 1;">
-                    <span class="dot" style="background: {dot_color};"></span>
-                    <span style="font-size: 15px; font-weight: 400; color: rgba(255, 255, 255, 0.9);">{category}</span>
-                    {mom_badge}
+            <div class="card" style="border-left: 4px solid {border_color};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <div style="font-size: 16px; font-weight: 700; color: #ffffff;">{category}</div>
+                    <div style="font-size: 18px; font-weight: 700; color: #00d4aa;">${amount:,.2f}</div>
                 </div>
-                <div style="font-size: 17px; font-weight: 600; color: #00C9A7;">${amount:,.0f}</div>
+                <div style="font-size: 14px; color: #8b8b9a;">{percentage:.1f}% of total</div>
+                {mom_badge}
             </div>"""
+
+    html += """
+        </div>"""
 
     # Subscriptions section
     if subscriptions:
-        html += """
-        <div class="divider"></div>
-        <div style="padding: 32px 0;">"""
+        html += f"""
+        <div style="margin-bottom: 20px;">
+            <h2 style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Subscriptions</h2>
+            <div class="card" style="border-left: 4px solid #00d4aa;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1e1e2e;">
+                    <div style="font-size: 16px; font-weight: 700; color: #00d4aa;">Monthly Recurring</div>
+                    <div style="font-size: 20px; font-weight: 700; color: #ffffff;">${subscription_total:,.2f}/mo</div>
+                </div>"""
 
-        for i, sub in enumerate(sorted(subscriptions, key=lambda x: x.amount, reverse=True)):
-            border_bottom = "" if i == len(subscriptions) - 1 else "border-bottom: 1px solid rgba(255, 255, 255, 0.08);"
+        for sub in sorted(subscriptions, key=lambda x: x.amount, reverse=True):
             html += f"""
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; {border_bottom}">
-                <div style="font-size: 14px; font-weight: 400; color: rgba(255, 255, 255, 0.65);">{sub.merchant} <span style="font-size: 10px; vertical-align: super; color: rgba(255, 255, 255, 0.35);">SUB</span></div>
-                <div style="font-size: 15px; font-weight: 600; color: #00C9A7;">${sub.amount:,.0f}</div>
-            </div>"""
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0;">
+                    <div style="font-size: 16px; font-weight: 500; color: #ffffff;">{sub.merchant}</div>
+                    <div style="font-size: 16px; font-weight: 600; color: #00d4aa;">${sub.amount:,.2f}</div>
+                </div>"""
 
         html += """
+            </div>
         </div>"""
 
     # Top Merchants section
     html += """
-        <div class="divider"></div>
-        <div style="padding: 32px 0;">"""
+        <div style="margin-bottom: 20px;">
+            <h2 style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Top Merchants</h2>"""
 
-    for i, (merchant, data) in enumerate(top_merchants):
-        border_bottom = "" if i == len(top_merchants) - 1 else "border-bottom: 1px solid rgba(255, 255, 255, 0.08);"
+    for merchant, data in top_merchants:
         html += f"""
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; {border_bottom}">
-                <div style="font-size: 14px; font-weight: 400; color: rgba(255, 255, 255, 0.9); flex: 1;">{merchant} <span style="font-size: 10px; vertical-align: super; color: rgba(255, 255, 255, 0.35);">{data['count']}</span></div>
-                <div style="font-size: 15px; font-weight: 600; color: #00C9A7;">${data['amount']:,.0f}</div>
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 16px; font-weight: 700; color: #ffffff; flex: 1;">{merchant}</div>
+                    <div style="display: inline-block; background: #1e1e2e; color: #8b8b9a; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; margin: 0 12px;">{data['count']}×</div>
+                    <div style="font-size: 18px; font-weight: 700; color: #00d4aa; white-space: nowrap;">${data['amount']:,.2f}</div>
+                </div>
             </div>"""
 
     html += """
         </div>"""
 
-    # Month-over-month comparison - single prominent line
+    # Month-over-month comparison
     if mom_change is not None:
-        mom_color = "#FF6B6B" if mom_change > 0 else "#00C9A7"
+        mom_color = "#ef4444" if mom_change > 0 else "#10b981"
         mom_arrow = "↑" if mom_change > 0 else "↓"
+        mom_bg = "rgba(239, 68, 68, 0.1)" if mom_change > 0 else "rgba(16, 185, 129, 0.1)"
+        mom_label = "More than last month" if mom_change > 0 else "Less than last month"
+
         html += f"""
-        <div class="divider"></div>
-        <div style="padding: 40px 0; text-align: center;">
-            <div style="font-size: 44px; font-weight: 300; color: {mom_color}; line-height: 1; margin-bottom: 8px;">
-                {mom_arrow} ${abs(mom_change):,.0f}
+        <div class="card" style="background: {mom_bg}; border-color: {mom_color}; text-align: center; padding: 28px 20px;">
+            <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 12px;">Month over Month</div>
+            <div style="font-size: 42px; font-weight: 700; color: {mom_color}; line-height: 1; margin-bottom: 8px;">
+                {mom_arrow} ${abs(mom_change):,.2f}
             </div>
-            <div style="font-size: 12px; font-weight: 400; color: rgba(255, 255, 255, 0.35);">{mom_percent:+.1f}% vs last month</div>
+            <div style="display: inline-block; background: {mom_color}; color: #ffffff; padding: 6px 14px; border-radius: 16px; font-size: 14px; font-weight: 600; margin-top: 8px;">
+                {mom_percent:+.1f}% · {mom_label}
+            </div>
         </div>"""
 
-    # Data Quality - minimal footer note
+    # Data Quality section - dedicated dark card
     if data_quality:
         files_count = data_quality.get('files_processed', 0)
         total_found = data_quality.get('total_found', 0)
         total_skipped = data_quality.get('total_skipped', 0)
         source_breakdown = data_quality.get('source_breakdown', {})
-        sources = ', '.join([f"{s} ({c})" for s, c in sorted(source_breakdown.items(), key=lambda x: x[1], reverse=True)])
 
         html += f"""
-        <div class="divider"></div>
-        <div style="padding: 32px 0; text-align: center;">
-            <div style="font-size: 10px; font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.25); line-height: 1.6;">
-                {files_count} FILES · {total_found} TRANSACTIONS · {total_skipped} SKIPPED<br>
-                {sources}
+        <div style="margin-top: 32px;">
+            <h2 style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Data Quality</h2>
+            <div class="card">
+                <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+                    <div style="flex: 1; text-align: center; background: #1e1e2e; border-radius: 8px; padding: 16px;">
+                        <div style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 8px;">Files</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #00d4aa;">{files_count}</div>
+                    </div>
+                    <div style="flex: 1; text-align: center; background: #1e1e2e; border-radius: 8px; padding: 16px;">
+                        <div style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 8px;">Transactions</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #00d4aa;">{total_found}</div>
+                    </div>
+                    <div style="flex: 1; text-align: center; background: #1e1e2e; border-radius: 8px; padding: 16px;">
+                        <div style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 8px;">Skipped</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #ef4444;">{total_skipped}</div>
+                    </div>
+                </div>
+                <div style="border-top: 1px solid #1e1e2e; padding-top: 16px;">
+                    <div style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 12px;">Sources</div>"""
+
+        # Show each source on its own line, hide sources with 0 transactions
+        for source, count in sorted(source_breakdown.items(), key=lambda x: x[1], reverse=True):
+            if count > 0:
+                html += f"""
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1e1e2e;">
+                        <div style="font-size: 16px; font-weight: 500; color: #ffffff;">{source}</div>
+                        <div style="font-size: 16px; font-weight: 600; color: #00d4aa;">{count} txns</div>
+                    </div>"""
+
+        html += """
+                </div>
             </div>
         </div>"""
 
-    # Footer - minimal timestamp
+    # Footer
     html += f"""
-        <div style="text-align: center; padding: 32px 0 0 0;">
-            <div style="font-size: 10px; font-weight: 400; color: rgba(255, 255, 255, 0.2); letter-spacing: 0.05em;">
-                {datetime.now().strftime('%B %d, %Y').upper()}
+        <div style="text-align: center; padding: 24px 0; margin-top: 32px;">
+            <div style="font-size: 12px; font-weight: 500; color: #8b8b9a;">
+                {datetime.now().strftime('%B %d, %Y')}
             </div>
         </div>
     </div>
 
     <style>
         @media (prefers-color-scheme: light) {{
-            body {{ background: #F5F5F7 !important; color: #1d1d1f !important; }}
-            .container {{ background: #F5F5F7 !important; }}
-            .divider {{ background: rgba(0, 0, 0, 0.08) !important; }}
-            .hero-amount, div[style*="rgba(255, 255, 255, 0.9)"], div[style*="color: #ffffff"] {{
-                color: #1d1d1f !important;
+            body {{ color: #1a1a1f !important; }}
+            div[style*="color: #ffffff"] {{
+                color: #1a1a1f !important;
             }}
-            div[style*="rgba(255, 255, 255, 0.45)"] {{
-                color: rgba(0, 0, 0, 0.45) !important;
+            div[style*="color: #8b8b9a"] {{
+                color: #6a6a78 !important;
             }}
-            div[style*="rgba(255, 255, 255, 0.35)"], div[style*="rgba(255, 255, 255, 0.25)"], div[style*="rgba(255, 255, 255, 0.2)"] {{
-                color: rgba(0, 0, 0, 0.35) !important;
-            }}
-            div[style*="rgba(255, 255, 255, 0.65)"] {{
-                color: rgba(0, 0, 0, 0.65) !important;
-            }}
-            div[style*="color: #00C9A7"] {{
-                color: #00866B !important;
+            div[style*="background: #1e1e2e"] {{
+                background: #e8e8f0 !important;
             }}
         }}
     </style>
