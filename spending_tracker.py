@@ -608,6 +608,15 @@ Subscription detection: Mark is_subscription=true ONLY for: streaming services (
 Return the JSON now:"""
 
         try:
+            logger.info("="*60)
+            logger.info("CLAUDE CATEGORIZATION - SENDING REQUEST")
+            logger.info("="*60)
+            logger.info(f"Number of transactions to categorize: {len(transactions)}")
+            logger.info(f"Prompt (first 500 chars): {prompt[:500]}...")
+            logger.info(f"Transaction list sample (first 3):")
+            for tx in tx_list[:3]:
+                logger.info(f"  {tx}")
+
             message = self.client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=4096,
@@ -615,14 +624,21 @@ Return the JSON now:"""
             )
 
             response_text = message.content[0].text
-            logger.info(f"Claude response preview: {response_text[:200]}...")
+            logger.info("="*60)
+            logger.info("CLAUDE CATEGORIZATION - RECEIVED RESPONSE")
+            logger.info("="*60)
+            logger.info(f"Full Claude response:\n{response_text}")
+            logger.info("="*60)
 
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())
                 categorized = result.get('categorized', [])
 
-                logger.info(f"Successfully parsed {len(categorized)} categorizations from Claude")
+                logger.info(f"✓ Successfully parsed {len(categorized)} categorizations from Claude")
+                logger.info(f"Sample categorizations (first 5):")
+                for item in categorized[:5]:
+                    logger.info(f"  ID {item.get('id')}: {item.get('category')} (sub: {item.get('is_subscription')})")
 
                 for item in categorized:
                     tx_id = item.get('id')
@@ -635,12 +651,17 @@ Return the JSON now:"""
 
                         transactions[tx_id].category = category
                         transactions[tx_id].is_subscription = item.get('is_subscription', False)
+                        logger.debug(f"  Assigned: {transactions[tx_id].merchant} → {category}")
             else:
-                logger.error("Could not extract JSON from Claude response")
+                logger.error("✗ Could not extract JSON from Claude response")
                 logger.error(f"Full response: {response_text}")
+                # Fallback: assign all to Other
+                for tx in transactions:
+                    tx.category = 'Other'
+                    tx.is_subscription = False
 
         except Exception as e:
-            logger.error(f"Error categorizing with Claude: {e}")
+            logger.error(f"✗ Error categorizing with Claude: {e}")
             import traceback
             logger.error(traceback.format_exc())
             for tx in transactions:
@@ -648,6 +669,9 @@ Return the JSON now:"""
                     tx.category = 'Other'
                     tx.is_subscription = False
 
+        logger.info("="*60)
+        logger.info("CATEGORIZATION COMPLETE")
+        logger.info("="*60)
         return transactions
 
 
@@ -696,6 +720,18 @@ class DataStore:
 
         prev_key = f"{prev_year}-{prev_month:02d}"
         return history.get(prev_key)
+
+
+def get_friendly_source_name(source: str) -> str:
+    """Convert internal source codes to friendly display names"""
+    source_mapping = {
+        'amex': 'American Express',
+        'rogers': 'Rogers Mastercard',
+        'wealthsimple_cc': 'Wealthsimple Credit Card',
+        'wealthsimple': 'Wealthsimple Chequing',
+        'td': 'TD Bank'
+    }
+    return source_mapping.get(source, source)
 
 
 def generate_html_report(year: int, month: int, transactions: List[Transaction],
@@ -959,9 +995,10 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         # Show each source on its own line, hide sources with 0 transactions
         for source, count in sorted(source_breakdown.items(), key=lambda x: x[1], reverse=True):
             if count > 0:
+                friendly_name = get_friendly_source_name(source)
                 html += f"""
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1e1e2e;">
-                        <div style="font-size: 16px; font-weight: 500; color: #ffffff;">{source}</div>
+                        <div style="font-size: 16px; font-weight: 500; color: #ffffff;">{friendly_name}</div>
                         <div style="font-size: 16px; font-weight: 600; color: #00d4aa;">{count} txns</div>
                     </div>"""
 
