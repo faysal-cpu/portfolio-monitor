@@ -1339,6 +1339,11 @@ def run_spending_analysis():
                 csv_reader = csv.reader(io.StringIO(csv_content))
                 rows = list(csv_reader)
                 transactions, skipped = parser.parse_td(rows)
+                # Debug: Show first 3 rows if 0 transactions
+                if len(transactions) == 0 and len(rows) > 0:
+                    logger.warning(f"  ⚠ TD parsed 0 transactions - showing first 3 rows for debugging:")
+                    for i, row in enumerate(rows[:3]):
+                        logger.warning(f"      Row {i+1}: {row}")
             else:
                 # Other banks have headers
                 csv_reader = csv.DictReader(io.StringIO(csv_content))
@@ -1364,6 +1369,11 @@ def run_spending_analysis():
                     transactions, skipped = parser.parse_wealthsimple_cc(rows)
                 elif source == 'amex':
                     transactions, skipped = parser.parse_amex(rows)
+                    # Debug: Show first 3 rows if 0 transactions
+                    if len(transactions) == 0 and len(rows) > 0:
+                        logger.warning(f"  ⚠ Amex parsed 0 transactions - showing first 3 rows for debugging:")
+                        for i, row in enumerate(rows[:3]):
+                            logger.warning(f"      Row {i+1}: {dict(row)}")
                 elif source == 'rogers':
                     transactions, skipped = parser.parse_rogers(rows)
                 else:
