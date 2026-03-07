@@ -54,6 +54,7 @@ logger.info(f".env file loaded: {env_loaded}")
 
 # API Clients
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
 REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
 REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET')
 REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT')
@@ -65,6 +66,7 @@ EMAIL_FROM = os.getenv('EMAIL_FROM')
 # Debug: Show what was loaded
 logger.info("Loaded credentials:")
 logger.info(f"  FINNHUB_API_KEY: {FINNHUB_API_KEY[:20] + '...' if FINNHUB_API_KEY else '✗ MISSING'}")
+logger.info(f"  ALPHA_VANTAGE_API_KEY: {ALPHA_VANTAGE_API_KEY[:15] + '...' if ALPHA_VANTAGE_API_KEY else '✗ MISSING'}")
 logger.info(f"  REDDIT_CLIENT_ID: {REDDIT_CLIENT_ID[:15] + '...' if REDDIT_CLIENT_ID else '✗ MISSING'}")
 logger.info(f"  REDDIT_CLIENT_SECRET: {REDDIT_CLIENT_SECRET[:15] + '...' if REDDIT_CLIENT_SECRET else '✗ MISSING'}")
 logger.info(f"  REDDIT_USER_AGENT: {REDDIT_USER_AGENT if REDDIT_USER_AGENT else '✗ MISSING'}")
@@ -119,21 +121,72 @@ def get_macro_context(date_str: str) -> str:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-        prompt = f"""Today is {date_str}. In 3 bullet points, give the most important macro and geopolitical factors a Canadian retail investor should know TODAY that could affect North American and global markets. Be specific — mention actual events, not generic risks."""
+        prompt = f"""Today is {date_str}. Search for today's most important market news and macro developments. In 3 bullet points, give the most important macro and geopolitical factors a Canadian retail investor should know TODAY that could affect North American and global markets. Be specific — mention actual events, not generic risks."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}]
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{"type": "web_search_20250305", "name": "web_search"}]
         )
 
-        response = message.content[0].text
-        logger.info("Successfully fetched macro context from Claude")
-        return response
+        # Extract text from response (handles tool use)
+        response_text = ""
+        for block in message.content:
+            if hasattr(block, 'text'):
+                response_text += block.text
+
+        if response_text:
+            logger.info("Successfully fetched macro context from Claude with web search")
+            return response_text
+        else:
+            logger.warning("No text found in macro context response")
+            return "• Market context unavailable\n• Please check logs for errors\n• Analysis continues with available data"
 
     except Exception as e:
         logger.error(f"Error fetching macro context: {e}")
         return "• Market context unavailable\n• Please check logs for errors\n• Analysis continues with available data"
+
+
+def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
+    """Fetch price data from Alpha Vantage as fallback (for Canadian TSX/CSE stocks)"""
+    if not ALPHA_VANTAGE_API_KEY:
+        return None
+
+    try:
+        # Try Canadian exchange suffixes: .TO (TSX), .V (Venture), .CN (CSE)
+        symbols_to_try = [f"{ticker}.TO", f"{ticker}.V", f"{ticker}.CN", ticker]
+
+        for symbol in symbols_to_try:
+            try:
+                url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={ALPHA_VANTAGE_API_KEY}"
+                response = requests.get(url, timeout=10)
+                data = response.json()
+
+                if 'Global Quote' in data and data['Global Quote']:
+                    quote = data['Global Quote']
+                    price = float(quote.get('05. price', 0))
+                    change_percent = float(quote.get('10. change percent', '0').rstrip('%'))
+
+                    if price > 0:  # Valid data found
+                        logger.info(f"✓ Alpha Vantage success for {ticker} (as {symbol}): ${price:.2f}")
+                        return {
+                            'ticker': ticker,
+                            'price': price,
+                            'change_percent': change_percent,
+                            'headlines': [],
+                            'source': 'Alpha Vantage'
+                        }
+
+                time.sleep(12)  # Alpha Vantage free tier: 5 calls/min
+            except Exception as e:
+                logger.warning(f"Alpha Vantage attempt failed for {symbol}: {e}")
+                continue
+
+        return None
+    except Exception as e:
+        logger.error(f"Alpha Vantage error for {ticker}: {e}")
+        return None
 
 
 def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
@@ -159,12 +212,33 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
 
         time.sleep(0.1)  # Rate limiting
 
-        return {
-            'ticker': ticker,
-            'price': current_price,
-            'change_percent': change_percent,
-            'headlines': headlines
-        }
+        # Check if we got valid price data
+        if current_price > 0:
+            return {
+                'ticker': ticker,
+                'price': current_price,
+                'change_percent': change_percent,
+                'headlines': headlines,
+                'source': 'Finnhub'
+            }
+        else:
+            # No price data from Finnhub, try Alpha Vantage
+            logger.warning(f"No price data from Finnhub for {ticker}, trying Alpha Vantage...")
+            av_data = fetch_alpha_vantage_data(ticker)
+            if av_data:
+                # Keep Finnhub news if available
+                av_data['headlines'] = headlines
+                return av_data
+            else:
+                # Both APIs failed, return ticker with N/A data
+                logger.warning(f"Both APIs failed for {ticker}, including with N/A data")
+                return {
+                    'ticker': ticker,
+                    'price': None,
+                    'change_percent': None,
+                    'headlines': headlines,
+                    'source': 'N/A'
+                }
 
     except Exception as e:
         logger.error(f"Error fetching data for {ticker}: {e}")
@@ -174,15 +248,31 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             time.sleep(2)
             try:
                 quote = finnhub_client.quote(ticker)
-                return {
-                    'ticker': ticker,
-                    'price': quote.get('c', 0),
-                    'change_percent': quote.get('dp', 0),
-                    'headlines': []
-                }
+                if quote.get('c', 0) > 0:
+                    return {
+                        'ticker': ticker,
+                        'price': quote.get('c', 0),
+                        'change_percent': quote.get('dp', 0),
+                        'headlines': [],
+                        'source': 'Finnhub'
+                    }
             except:
-                return None
-        return None
+                pass
+
+        # Try Alpha Vantage as fallback
+        logger.warning(f"Finnhub failed for {ticker}, trying Alpha Vantage...")
+        av_data = fetch_alpha_vantage_data(ticker)
+        if av_data:
+            return av_data
+
+        # Both failed, return N/A data
+        return {
+            'ticker': ticker,
+            'price': None,
+            'change_percent': None,
+            'headlines': [],
+            'source': 'N/A'
+        }
 
 
 def get_reddit_sentiment(ticker: str, reddit_client) -> Tuple[int, str]:
@@ -238,8 +328,21 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
         holdings_text = ""
         for data in holdings_data:
             holdings_text += f"\n{data['ticker']}:\n"
-            holdings_text += f"  Price: ${(data.get('price') or 0):.2f}\n"
-            holdings_text += f"  Day Change: {(data.get('change_percent') or 0):.2f}%\n"
+
+            # Handle None values for price
+            price = data.get('price')
+            if price is not None:
+                holdings_text += f"  Price: ${price:.2f}\n"
+            else:
+                holdings_text += f"  Price: N/A (data unavailable)\n"
+
+            # Handle None values for change_percent
+            change = data.get('change_percent')
+            if change is not None:
+                holdings_text += f"  Day Change: {change:.2f}%\n"
+            else:
+                holdings_text += f"  Day Change: N/A\n"
+
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
             holdings_text += f"  Reddit: {data.get('reddit_sentiment', 'N/A')}\n"
 
@@ -254,7 +357,7 @@ HOLDINGS DATA:
 For each stock give:
 - RECOMMENDATION: BUY MORE / HOLD / SELL / WATCH
 - CONFIDENCE: HIGH / MEDIUM / LOW
-- REASON: one sentence, max 15 words, be specific
+- REASON: 1-2 sentences (max 30 words). Include specific catalyst, data point, or price level. Be concrete and actionable.
 - RISK: one key risk to watch right now
 
 Consider: price action, news, Reddit sentiment, geopolitical context. Be direct and opinionated. If something should be sold, say so clearly.
@@ -338,7 +441,13 @@ def find_opportunities(trending_data: List[Dict]) -> str:
         # Format trending data
         trending_text = ""
         for data in trending_data:
-            trending_text += f"\n{data['ticker']}: ${(data.get('price') or 0):.2f} ({(data.get('change_percent') or 0):+.2f}%)\n"
+            price = data.get('price')
+            change = data.get('change_percent')
+
+            price_str = f"${price:.2f}" if price is not None else "N/A"
+            change_str = f"({change:+.2f}%)" if change is not None else "(N/A)"
+
+            trending_text += f"\n{data['ticker']}: {price_str} {change_str}\n"
             if data.get('headlines'):
                 trending_text += f"  News: {'; '.join(data['headlines'][:2])}\n"
 
@@ -422,13 +531,27 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
 
     lines = opportunities.strip().split('\n')
 
+    # Placeholder patterns to filter out
+    placeholder_patterns = ['TICKER', 'COMPANY', 'WHY TODAY', 'UPSIDE', 'RISK', 'EXCHANGE']
+
     for line in lines:
         if '|' in line:
             parts = line.split('|')
             if len(parts) >= 6:
+                ticker = parts[0].strip()
+                company = parts[1].strip()
+
+                # Skip if ticker or company matches placeholder patterns
+                if ticker.upper() in placeholder_patterns or company.upper() in placeholder_patterns:
+                    continue
+
+                # Skip if ticker contains placeholder-like text
+                if any(placeholder in ticker.upper() for placeholder in placeholder_patterns):
+                    continue
+
                 parsed.append({
-                    'ticker': parts[0].strip(),
-                    'company': parts[1].strip(),
+                    'ticker': ticker,
+                    'company': company,
                     'why_today': parts[2].strip(),
                     'upside': parts[3].strip(),
                     'risk': parts[4].strip(),
@@ -441,34 +564,261 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
 def create_html_email(macro_context: str, holdings: List[Dict], opportunities: List[Dict], date_str: str) -> Tuple[str, str]:
     """Create HTML and plain text email content"""
 
+    # Count recommendations by type
+    rec_counts = {'BUY MORE': 0, 'HOLD': 0, 'SELL': 0, 'WATCH': 0}
+    for h in holdings:
+        rec = h['recommendation'].upper()
+        if 'BUY MORE' in rec or 'BUY' in rec:
+            rec_counts['BUY MORE'] += 1
+        elif 'SELL' in rec:
+            rec_counts['SELL'] += 1
+        elif 'WATCH' in rec:
+            rec_counts['WATCH'] += 1
+        else:
+            rec_counts['HOLD'] += 1
+
+    rec_summary = f"{rec_counts['BUY MORE']} BUY · {rec_counts['HOLD']} HOLD · {rec_counts['SELL']} SELL · {rec_counts['WATCH']} WATCH"
+
     # HTML Email
     html = f"""
 <!DOCTYPE html>
 <html>
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }}
-        .container {{ max-width: 1200px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ background-color: #1A1A2E; color: white; padding: 30px; text-align: center; }}
-        .header h1 {{ margin: 0; font-size: 28px; }}
-        .section {{ padding: 30px; border-bottom: 1px solid #e0e0e0; }}
-        .section h2 {{ color: #1A1A2E; margin-top: 0; border-left: 4px solid #00B386; padding-left: 15px; }}
-        .macro-context {{ background-color: #f9f9f9; padding: 20px; border-radius: 5px; line-height: 1.8; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-        th {{ background-color: #1A1A2E; color: white; padding: 12px; text-align: left; font-weight: 600; }}
-        td {{ padding: 12px; border-bottom: 1px solid #e0e0e0; }}
-        tr:hover {{ background-color: #f5f5f5; }}
-        .buy-more {{ background-color: #d4edda; color: #155724; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
-        .hold {{ background-color: #e2e3e5; color: #383d41; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
-        .sell {{ background-color: #f8d7da; color: #721c24; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
-        .watch {{ background-color: #fff3cd; color: #856404; font-weight: bold; padding: 4px 8px; border-radius: 3px; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            font-size: 16px;
+            line-height: 1.6;
+            color: #2d3748;
+            -webkit-font-smoothing: antialiased;
+        }}
+        .container {{
+            max-width: 680px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }}
+        .header {{
+            background-color: #5a4d8a;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff !important;
+            padding: 40px 30px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            line-height: 1.3;
+            color: #ffffff !important;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }}
+        .section {{
+            padding: 32px 24px;
+            border-bottom: 1px solid #e2e8f0;
+        }}
+        .section:last-child {{ border-bottom: none; }}
+        .section h2 {{
+            color: #1a202c;
+            margin: 0 0 20px 0;
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }}
+        .macro-context {{
+            background: linear-gradient(135deg, #f6f8fb 0%, #eef2f7 100%);
+            padding: 24px;
+            border-radius: 12px;
+            line-height: 1.8;
+            font-size: 15px;
+            border-left: 4px solid #667eea;
+            color: #2d3748;
+        }}
+        .macro-context strong {{ color: #1a202c; }}
+        .rec-summary {{
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            padding: 16px 20px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: #2d3748;
+            border: 1px solid #e2e8f0;
+            letter-spacing: 0.3px;
+        }}
+
+        /* Stock Cards - Mobile First */
+        .stock-card {{
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            transition: all 0.2s ease;
+        }}
+        .stock-card:hover {{
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            transform: translateY(-2px);
+        }}
+        .stock-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .stock-ticker {{
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a202c;
+            letter-spacing: 0.5px;
+        }}
+        .stock-price {{
+            font-size: 17px;
+            font-weight: 600;
+            color: #2d3748;
+        }}
+        .stock-change {{
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+        }}
+        .stock-change.positive {{ color: #10b981; }}
+        .stock-change.negative {{ color: #ef4444; }}
+        .stock-rec-line {{
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #f1f5f9;
+        }}
+        .stock-detail {{
+            margin: 10px 0;
+            font-size: 14px;
+            line-height: 1.7;
+            color: #4a5568;
+        }}
+        .stock-detail strong {{
+            color: #1a202c;
+            font-weight: 600;
+        }}
+
+        .buy-more {{
+            background: #d1fae5;
+            color: #065f46;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+            border: 2px solid #10b981;
+        }}
+        .hold {{
+            background: #fef3c7;
+            color: #78350f;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+            border: 2px solid #f59e0b;
+        }}
+        .sell {{
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+            border: 2px solid #ef4444;
+        }}
+        .watch {{
+            background: #e0e7ff;
+            color: #3730a3;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+            border: 2px solid #6366f1;
+        }}
         .positive {{ color: #00B386; font-weight: bold; }}
         .negative {{ color: #dc3545; font-weight: bold; }}
-        .opportunity-card {{ background-color: #f9f9f9; padding: 20px; margin: 15px 0; border-left: 4px solid #00B386; border-radius: 5px; }}
-        .opportunity-card h3 {{ margin: 0 0 10px 0; color: #1A1A2E; }}
-        .opportunity-card .ticker {{ font-size: 20px; font-weight: bold; color: #00B386; }}
-        .footer {{ background-color: #1A1A2E; color: #999; padding: 20px; text-align: center; font-size: 12px; }}
-        .footer .timestamp {{ color: #00B386; }}
+        .opportunity-card {{
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            padding: 24px;
+            margin: 16px 0;
+            border-left: 5px solid #f59e0b;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(245, 158, 11, 0.15);
+        }}
+        .opportunity-card h3 {{
+            margin: 0 0 12px 0;
+            color: #1a202c;
+            font-size: 17px;
+            font-weight: 700;
+        }}
+        .opportunity-card .ticker {{
+            font-size: 20px;
+            font-weight: 800;
+            color: #d97706;
+            letter-spacing: 0.5px;
+        }}
+        .opportunity-card p {{
+            margin: 8px 0;
+            line-height: 1.6;
+            color: #4a5568;
+        }}
+        .footer {{
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            color: #a0aec0;
+            padding: 28px;
+            text-align: center;
+            font-size: 13px;
+            line-height: 1.8;
+        }}
+        .footer .timestamp {{
+            color: #667eea;
+            font-weight: 600;
+        }}
+        .footer strong {{ color: #e2e8f0; }}
+
+        /* Mobile responsive */
+        @media only screen and (max-width: 600px) {{
+            body {{ padding: 12px; }}
+            .container {{ border-radius: 12px; }}
+            .header {{ padding: 32px 20px; }}
+            .header h1 {{ font-size: 20px; }}
+            .section {{ padding: 24px 16px; }}
+            .section h2 {{ font-size: 18px; }}
+            .stock-card {{ padding: 16px; }}
+            .stock-ticker {{ font-size: 17px; }}
+            .stock-price, .stock-change {{ font-size: 15px; }}
+            .macro-context {{ padding: 18px; font-size: 14px; }}
+            .opportunity-card {{ padding: 18px; }}
+        }}
     </style>
 </head>
 <body>
@@ -480,31 +830,32 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         <div class="section">
             <h2>🌍 Macro Context</h2>
             <div class="macro-context">
-                {macro_context.replace(chr(10), '<br>')}
+"""
+
+    # Process macro context: strip intro, convert markdown, add line breaks
+    import re
+    processed_macro = macro_context
+    # Strip everything before the first bullet point
+    if '•' in processed_macro:
+        processed_macro = '•' + processed_macro.split('•', 1)[1]
+    # Convert **text** to <strong>text</strong>
+    processed_macro = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', processed_macro)
+    # Convert newlines to <br>
+    processed_macro = processed_macro.replace(chr(10), '<br>')
+
+    html += f"""
+                {processed_macro}
             </div>
         </div>
 
         <div class="section">
             <h2>📊 Your Holdings</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Ticker</th>
-                        <th>Price</th>
-                        <th>Day Change</th>
-                        <th>Recommendation</th>
-                        <th>Confidence</th>
-                        <th>Reason</th>
-                        <th>Risk</th>
-                        <th>Reddit</th>
-                    </tr>
-                </thead>
-                <tbody>
+            <div class="rec-summary">{rec_summary}</div>
 """
 
     for h in holdings:
         rec_class = ''
-        if 'BUY MORE' in h['recommendation'].upper():
+        if 'BUY MORE' in h['recommendation'].upper() or 'BUY' in h['recommendation'].upper():
             rec_class = 'buy-more'
         elif 'SELL' in h['recommendation'].upper():
             rec_class = 'sell'
@@ -513,24 +864,34 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         else:
             rec_class = 'hold'
 
-        change_class = 'positive' if (h.get('change_percent') or 0) >= 0 else 'negative'
+        # Handle None values for price and change_percent
+        price_str = f"${h.get('price'):.2f}" if h.get('price') is not None else "N/A"
+        change_val = h.get('change_percent')
+        if change_val is not None:
+            change_class = 'positive' if change_val >= 0 else 'negative'
+            change_str = f"{change_val:+.2f}%"
+        else:
+            change_class = ''
+            change_str = "N/A"
 
         html += f"""
-                    <tr>
-                        <td><strong>{h['ticker']}</strong></td>
-                        <td>${(h.get('price') or 0):.2f}</td>
-                        <td class="{change_class}">{(h.get('change_percent') or 0):+.2f}%</td>
-                        <td><span class="{rec_class}">{h['recommendation']}</span></td>
-                        <td>{h['confidence']}</td>
-                        <td>{h['reason']}</td>
-                        <td>{h['risk']}</td>
-                        <td>{h['reddit']}</td>
-                    </tr>
+            <div class="stock-card">
+                <div class="stock-header">
+                    <span class="stock-ticker">{h['ticker']}</span>
+                    <span class="stock-price">{price_str}</span>
+                    <span class="stock-change {change_class}">{change_str}</span>
+                </div>
+                <div class="stock-rec-line">
+                    <span class="{rec_class}">{h['recommendation']}</span>
+                    <span style="color: #666; font-size: 13px; margin-left: 8px;">{h['confidence']} confidence</span>
+                </div>
+                <div class="stock-detail"><strong>Reason:</strong> {h['reason']}</div>
+                <div class="stock-detail"><strong>Risk:</strong> {h['risk']}</div>
+                <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>Reddit:</strong> {h['reddit']}</div>
+            </div>
 """
 
     html += """
-                </tbody>
-            </table>
         </div>
 """
 
@@ -540,13 +901,21 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             <h2>🔥 Opportunities</h2>
 """
         for opp in opportunities:
+            # Convert markdown **text** to HTML <strong>text</strong>
+            import re
+            why_today = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['why_today'])
+            company = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['company'])
+            upside = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['upside'])
+            risk = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['risk'])
+            exchange = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['exchange'])
+
             html += f"""
             <div class="opportunity-card">
                 <div class="ticker">{opp['ticker']}</div>
-                <h3>{opp['company']}</h3>
-                <p><strong>Why Today:</strong> {opp['why_today']}</p>
-                <p><strong>Upside:</strong> {opp['upside']} | <strong>Risk:</strong> {opp['risk']}</p>
-                <p><strong>Exchange:</strong> {opp['exchange']}</p>
+                <h3>{company}</h3>
+                <p><strong>Why Today:</strong> {why_today}</p>
+                <p><strong>Upside:</strong> {upside} | <strong>Risk:</strong> {risk}</p>
+                <p><strong>Exchange:</strong> {exchange}</p>
             </div>
 """
         html += """
@@ -574,7 +943,11 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 === YOUR HOLDINGS ===
 """
     for h in holdings:
-        plain += f"\n{h['ticker']}: ${(h.get('price') or 0):.2f} ({(h.get('change_percent') or 0):+.2f}%)\n"
+        price_str = f"${h.get('price'):.2f}" if h.get('price') is not None else "N/A"
+        change_val = h.get('change_percent')
+        change_str = f"({change_val:+.2f}%)" if change_val is not None else "(N/A)"
+
+        plain += f"\n{h['ticker']}: {price_str} {change_str}\n"
         plain += f"  Recommendation: {h.get('recommendation', 'N/A')} ({h.get('confidence', 'N/A')} confidence)\n"
         plain += f"  Reason: {h.get('reason', 'N/A')}\n"
         plain += f"  Risk: {h.get('risk', 'N/A')}\n"
@@ -752,14 +1125,14 @@ def run_portfolio_analysis():
 
 
 def schedule_job():
-    """Schedule the job to run weekdays at 7am"""
-    logger.info("Scheduler initialized - Running Mon-Fri at 7:00am")
+    """Schedule the job to run weekdays at 11am"""
+    logger.info("Scheduler initialized - Running Mon-Fri at 11:00am")
 
-    schedule.every().monday.at("07:00").do(run_portfolio_analysis)
-    schedule.every().tuesday.at("07:00").do(run_portfolio_analysis)
-    schedule.every().wednesday.at("07:00").do(run_portfolio_analysis)
-    schedule.every().thursday.at("07:00").do(run_portfolio_analysis)
-    schedule.every().friday.at("07:00").do(run_portfolio_analysis)
+    schedule.every().monday.at("11:00").do(run_portfolio_analysis)
+    schedule.every().tuesday.at("11:00").do(run_portfolio_analysis)
+    schedule.every().wednesday.at("11:00").do(run_portfolio_analysis)
+    schedule.every().thursday.at("11:00").do(run_portfolio_analysis)
+    schedule.every().friday.at("11:00").do(run_portfolio_analysis)
 
     while True:
         schedule.run_pending()

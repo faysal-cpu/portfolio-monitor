@@ -253,3 +253,4 @@ tail -f monitor.log
 ```
 
 All API errors, rate limits, and processing issues are logged with timestamps.
+ 
