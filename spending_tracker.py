@@ -145,6 +145,8 @@ class CSVParser:
         filename_lower = filename.lower()
 
         # Check filename first
+        if 'wealthsimple-credit-card' in filename_lower:
+            return 'wealthsimple_cc'
         if filename_lower.startswith('activity'):
             return 'wealthsimple'
         if filename_lower.startswith('transactions'):
@@ -156,7 +158,11 @@ class CSVParser:
         if 'merchant name' in headers_lower and 'activity type' in headers_lower and 'merchant category description' in headers_lower:
             return 'rogers'
 
-        # Wealthsimple: date, transaction, description, amount, balance, currency
+        # Wealthsimple Credit Card: transaction_date, post_date, type, details, amount, currency
+        if all(h in headers_lower for h in ['transaction_date', 'post_date', 'type', 'details']):
+            return 'wealthsimple_cc'
+
+        # Wealthsimple Cash: date, transaction, description, amount, balance, currency
         if all(h in headers_lower for h in ['date', 'transaction', 'description', 'amount', 'balance', 'currency']):
             return 'wealthsimple'
 
@@ -209,6 +215,53 @@ class CSVParser:
                 ))
             except Exception as e:
                 logger.error(f"Error parsing Wealthsimple row: {e}")
+                continue
+
+        return transactions, skipped
+
+    @staticmethod
+    def parse_wealthsimple_cc(rows: List[Dict]) -> Tuple[List[Transaction], int]:
+        """Parse Wealthsimple Credit Card CSV format
+        Headers: transaction_date, post_date, type, details, amount, currency
+        Positive amount = spending (like Amex)
+        """
+        transactions = []
+        skipped = 0
+
+        for row in rows:
+            try:
+                # Wealthsimple CC columns
+                date_str = row.get('transaction_date') or row.get('post_date')
+                description = row.get('details') or row.get('type')
+                amount_str = row.get('amount')
+
+                if not all([date_str, description, amount_str]):
+                    continue
+
+                date = CSVParser._parse_date(date_str)
+                if not date:
+                    continue
+
+                amount = CSVParser._parse_amount(amount_str)
+
+                # Positive = spending for Wealthsimple Credit Card
+                if amount <= 0:
+                    continue
+
+                if CSVParser._is_payment_or_transfer(description):
+                    skipped += 1
+                    continue
+
+                transactions.append(Transaction(
+                    date=date,
+                    description=description,
+                    amount=abs(amount),
+                    merchant=CSVParser._clean_merchant_name(description),
+                    source='Wealthsimple Credit Card',
+                    raw_data=row
+                ))
+            except Exception as e:
+                logger.error(f"Error parsing Wealthsimple CC row: {e}")
                 continue
 
         return transactions, skipped
@@ -1298,6 +1351,8 @@ def run_spending_analysis():
 
                 if source == 'wealthsimple':
                     transactions, skipped = parser.parse_wealthsimple(rows)
+                elif source == 'wealthsimple_cc':
+                    transactions, skipped = parser.parse_wealthsimple_cc(rows)
                 elif source == 'amex':
                     transactions, skipped = parser.parse_amex(rows)
                 elif source == 'rogers':
