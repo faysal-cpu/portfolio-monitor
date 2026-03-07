@@ -138,35 +138,49 @@ class CSVParser:
     @staticmethod
     def detect_source(headers: List[str], filename: str) -> Optional[str]:
         """Detect which bank based on headers or filename"""
+        if headers is None:
+            headers = []
+
         headers_lower = [h.lower().strip() for h in headers]
         filename_lower = filename.lower()
 
-        if 'wealthsimple' in filename_lower or 'ws_' in filename_lower:
+        # Check filename first
+        if filename_lower.startswith('activity'):
             return 'wealthsimple'
-        if 'amex' in filename_lower or 'american_express' in filename_lower or 'americanexpress' in filename_lower:
+        if filename_lower.startswith('transactions'):
             return 'amex'
-        if 'rogers' in filename_lower or 'mastercard' in filename_lower:
+        if filename_lower.startswith('accountactivit'):
+            return 'td'
+
+        # Rogers has distinctive long header list
+        if 'merchant name' in headers_lower and 'activity type' in headers_lower and 'merchant category description' in headers_lower:
             return 'rogers'
 
-        if 'posted date' in headers_lower and 'payee' in headers_lower:
+        # Wealthsimple: date, transaction, description, amount, balance, currency
+        if all(h in headers_lower for h in ['date', 'transaction', 'description', 'amount', 'balance', 'currency']):
             return 'wealthsimple'
-        if 'date' in headers_lower and 'description' in headers_lower and 'amount' in headers_lower:
-            if 'card member' in headers_lower or 'reference' in headers_lower:
-                return 'amex'
-            if 'activity type' in headers_lower or 'merchant name' in headers_lower:
-                return 'rogers'
+
+        # Amex: Date, Date Processed, Description, Amount
+        if 'date processed' in headers_lower and 'description' in headers_lower and 'amount' in headers_lower:
+            return 'amex'
 
         return None
 
     @staticmethod
-    def parse_wealthsimple(rows: List[Dict]) -> List[Transaction]:
-        """Parse Wealthsimple CSV format"""
+    def parse_wealthsimple(rows: List[Dict]) -> Tuple[List[Transaction], int]:
+        """Parse Wealthsimple CSV format
+        Headers: date, transaction, description, amount, balance, currency
+        Negative amount = spending
+        """
         transactions = []
+        skipped = 0
+
         for row in rows:
             try:
-                date_str = row.get('Posted Date') or row.get('posted date') or row.get('Date')
-                description = row.get('Payee') or row.get('payee') or row.get('Description')
-                amount_str = row.get('Amount') or row.get('amount')
+                # Wealthsimple exact columns
+                date_str = row.get('date') or row.get('Date')
+                description = row.get('description') or row.get('Description')
+                amount_str = row.get('amount') or row.get('Amount')
 
                 if not all([date_str, description, amount_str]):
                     continue
@@ -176,10 +190,13 @@ class CSVParser:
                     continue
 
                 amount = CSVParser._parse_amount(amount_str)
+
+                # Negative = spending for Wealthsimple
                 if amount >= 0:
                     continue
 
                 if CSVParser._is_payment_or_transfer(description):
+                    skipped += 1
                     continue
 
                 transactions.append(Transaction(
@@ -194,12 +211,17 @@ class CSVParser:
                 logger.error(f"Error parsing Wealthsimple row: {e}")
                 continue
 
-        return transactions
+        return transactions, skipped
 
     @staticmethod
-    def parse_amex(rows: List[Dict]) -> List[Transaction]:
-        """Parse American Express CSV format"""
+    def parse_amex(rows: List[Dict]) -> Tuple[List[Transaction], int]:
+        """Parse American Express CSV format
+        Headers: Date, Date Processed, Description, Amount
+        Positive amount = spending
+        """
         transactions = []
+        skipped = 0
+
         for row in rows:
             try:
                 date_str = row.get('Date') or row.get('date')
@@ -214,10 +236,13 @@ class CSVParser:
                     continue
 
                 amount = CSVParser._parse_amount(amount_str)
-                if amount >= 0:
+
+                # Positive = spending for Amex
+                if amount <= 0:
                     continue
 
                 if CSVParser._is_payment_or_transfer(description):
+                    skipped += 1
                     continue
 
                 transactions.append(Transaction(
@@ -232,17 +257,73 @@ class CSVParser:
                 logger.error(f"Error parsing Amex row: {e}")
                 continue
 
-        return transactions
+        return transactions, skipped
 
     @staticmethod
-    def parse_rogers(rows: List[Dict]) -> List[Transaction]:
-        """Parse Rogers Mastercard CSV format"""
+    def parse_rogers(rows: List[Dict]) -> Tuple[List[Transaction], int]:
+        """Parse Rogers Mastercard CSV format
+        Many headers including: Date, Merchant Name, Amount (with $ sign)
+        """
         transactions = []
+        skipped = 0
+
         for row in rows:
             try:
-                date_str = row.get('Transaction Date') or row.get('Date') or row.get('date')
-                description = row.get('Merchant Name') or row.get('Description') or row.get('description')
+                date_str = row.get('Date') or row.get('date')
+                merchant = row.get('Merchant Name') or row.get('merchant name')
                 amount_str = row.get('Amount') or row.get('amount')
+
+                if not all([date_str, merchant, amount_str]):
+                    continue
+
+                date = CSVParser._parse_date(date_str)
+                if not date:
+                    continue
+
+                # Rogers amount has $ sign - strip it
+                amount = CSVParser._parse_amount(amount_str)
+
+                # Check if spending (should be positive after stripping $)
+                if amount <= 0:
+                    continue
+
+                if CSVParser._is_payment_or_transfer(merchant):
+                    skipped += 1
+                    continue
+
+                transactions.append(Transaction(
+                    date=date,
+                    description=merchant,
+                    amount=abs(amount),
+                    merchant=CSVParser._clean_merchant_name(merchant),
+                    source='Rogers Mastercard',
+                    raw_data=row
+                ))
+            except Exception as e:
+                logger.error(f"Error parsing Rogers row: {e}")
+                continue
+
+        return transactions, skipped
+
+    @staticmethod
+    def parse_td(rows: List[List[str]]) -> Tuple[List[Transaction], int]:
+        """Parse TD CSV format
+        NO HEADERS - data starts on row 1
+        Columns: Date, Description, Amount, Balance (in that order)
+        Negative amount = spending
+        """
+        transactions = []
+        skipped = 0
+
+        for row in rows:
+            try:
+                # TD has no headers, columns are: Date(0), Description(1), Amount(2), Balance(3)
+                if len(row) < 3:
+                    continue
+
+                date_str = row[0]
+                description = row[1]
+                amount_str = row[2]
 
                 if not all([date_str, description, amount_str]):
                     continue
@@ -252,10 +333,13 @@ class CSVParser:
                     continue
 
                 amount = CSVParser._parse_amount(amount_str)
+
+                # Negative = spending for TD
                 if amount >= 0:
                     continue
 
                 if CSVParser._is_payment_or_transfer(description):
+                    skipped += 1
                     continue
 
                 transactions.append(Transaction(
@@ -263,14 +347,14 @@ class CSVParser:
                     description=description,
                     amount=abs(amount),
                     merchant=CSVParser._clean_merchant_name(description),
-                    source='Rogers Mastercard',
-                    raw_data=row
+                    source='TD',
+                    raw_data={'date': date_str, 'description': description, 'amount': amount_str}
                 ))
             except Exception as e:
-                logger.error(f"Error parsing Rogers row: {e}")
+                logger.error(f"Error parsing TD row: {e}")
                 continue
 
-        return transactions
+        return transactions, skipped
 
     @staticmethod
     def _parse_date(date_str: str) -> Optional[datetime]:
@@ -299,9 +383,10 @@ class CSVParser:
         """Check if transaction is a payment or transfer"""
         desc_lower = description.lower()
         keywords = [
+            'royal bank', 'rogers pay', 'amex', 'td payment',
+            'internet transfer', 'e-transfer', 'etransfer',
             'payment', 'thank you', 'pymt', 'transfer', 'interac',
-            'credit card payment', 'autopay', 'pre-authorized',
-            'withdrawal', 'deposit', 'etransfer', 'e-transfer'
+            'credit card payment', 'autopay', 'pre-authorized'
         ]
         return any(keyword in desc_lower for keyword in keywords)
 
@@ -504,7 +589,8 @@ class DataStore:
         return history.get(prev_key)
 
 
-def generate_html_report(year: int, month: int, transactions: List[Transaction]) -> str:
+def generate_html_report(year: int, month: int, transactions: List[Transaction],
+                         data_quality: Dict[str, Any] = None) -> str:
     """Generate beautiful dark-themed HTML report"""
 
     total_spent = sum(tx.amount for tx in transactions)
@@ -714,6 +800,51 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction])
             </div>
         </div>"""
 
+    # Data Quality Summary
+    if data_quality:
+        html += """
+        <div class="section">
+            <h2 class="section-title">📊 Data Quality Summary</h2>
+            <div style="background: #252538; border-radius: 12px; padding: 24px; border: 1px solid #2a2a3e;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                    <div>
+                        <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 8px;">Files Processed</div>
+                        <div style="color: #00d4aa; font-size: 24px; font-weight: 700;">{files}</div>
+                    </div>
+                    <div>
+                        <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 8px;">Total Transactions</div>
+                        <div style="color: #00d4aa; font-size: 24px; font-weight: 700;">{total}</div>
+                    </div>
+                    <div>
+                        <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 8px;">Skipped (Payments/Transfers)</div>
+                        <div style="color: #ff4757; font-size: 24px; font-weight: 700;">{skipped}</div>
+                    </div>
+                </div>
+                <div style="border-top: 1px solid #2a2a3e; padding-top: 20px;">
+                    <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 12px;">Breakdown by Source</div>
+                    <div style="display: grid; gap: 8px;">
+""".format(
+            files=data_quality.get('files_processed', 0),
+            total=data_quality.get('total_found', 0),
+            skipped=data_quality.get('total_skipped', 0)
+        )
+
+        # Add source breakdown
+        source_breakdown = data_quality.get('source_breakdown', {})
+        for source, count in sorted(source_breakdown.items(), key=lambda x: x[1], reverse=True):
+            html += f"""
+                        <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: #1a1a2e; border-radius: 6px;">
+                            <span style="color: #e0e0e0;">{source}</span>
+                            <span style="color: #00d4aa; font-weight: 600;">{count} transactions</span>
+                        </div>"""
+
+        html += """
+                    </div>
+                </div>
+            </div>
+        </div>
+        """
+
     html += f"""
         <div class="footer">
             Generated by Spending Tracker on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}<br>
@@ -816,6 +947,9 @@ def run_spending_analysis():
         logger.info(f"Found {len(new_files)} new file(s)\n")
 
         all_transactions = []
+        total_skipped = 0
+        source_counts = defaultdict(int)
+        files_processed = 0
 
         for file_info in new_files:
             file_id = file_info['id']
@@ -825,30 +959,43 @@ def run_spending_analysis():
 
             csv_content = drive_monitor.download_file(file_id)
 
-            csv_reader = csv.DictReader(io.StringIO(csv_content))
-            headers = csv_reader.fieldnames
-            rows = list(csv_reader)
+            # Try to detect source first to handle TD (no headers)
+            source = parser.detect_source(None, filename)
 
-            source = parser.detect_source(headers, filename)
-
-            if not source:
-                logger.warning(f"  ✗ Could not detect bank source for {filename}")
-                continue
-
-            logger.info(f"  Detected source: {source}")
-
-            if source == 'wealthsimple':
-                transactions = parser.parse_wealthsimple(rows)
-            elif source == 'amex':
-                transactions = parser.parse_amex(rows)
-            elif source == 'rogers':
-                transactions = parser.parse_rogers(rows)
+            if source == 'td':
+                # TD has no headers - parse as raw rows
+                csv_reader = csv.reader(io.StringIO(csv_content))
+                rows = list(csv_reader)
+                transactions, skipped = parser.parse_td(rows)
             else:
-                logger.warning(f"  ✗ Unknown source: {source}")
-                continue
+                # Other banks have headers
+                csv_reader = csv.DictReader(io.StringIO(csv_content))
+                headers = csv_reader.fieldnames
+                rows = list(csv_reader)
 
-            logger.info(f"  Parsed {len(transactions)} transactions")
+                source = parser.detect_source(headers, filename)
+
+                if not source:
+                    logger.warning(f"  ✗ Could not detect bank source for {filename}")
+                    continue
+
+                logger.info(f"  Detected source: {source}")
+
+                if source == 'wealthsimple':
+                    transactions, skipped = parser.parse_wealthsimple(rows)
+                elif source == 'amex':
+                    transactions, skipped = parser.parse_amex(rows)
+                elif source == 'rogers':
+                    transactions, skipped = parser.parse_rogers(rows)
+                else:
+                    logger.warning(f"  ✗ Unknown source: {source}")
+                    continue
+
+            logger.info(f"  Parsed {len(transactions)} transactions, skipped {skipped} transfers/payments")
             all_transactions.extend(transactions)
+            total_skipped += skipped
+            source_counts[source] += len(transactions)
+            files_processed += 1
 
             drive_monitor.mark_as_processed(file_id, filename)
             logger.info(f"  ✓ Marked as processed\n")
@@ -872,7 +1019,15 @@ def run_spending_analysis():
             month_name = datetime(year, month, 1).strftime('%B %Y')
             logger.info(f"Generating report for {month_name}...")
 
-            html_report = generate_html_report(year, month, transactions)
+            # Pass data quality metrics
+            data_quality = {
+                'files_processed': files_processed,
+                'total_found': len(all_transactions),
+                'total_skipped': total_skipped,
+                'source_breakdown': dict(source_counts)
+            }
+
+            html_report = generate_html_report(year, month, transactions, data_quality)
 
             subject = f"💳 Spending Report: {month_name}"
             send_email(subject, html_report)
