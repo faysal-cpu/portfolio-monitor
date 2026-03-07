@@ -558,7 +558,7 @@ class ClaudeCategorizer:
         self.client = anthropic.Anthropic(api_key=api_key)
 
     def categorize_transactions(self, transactions: List[Transaction]) -> List[Transaction]:
-        """Batch categorize transactions using Claude"""
+        """Batch categorize transactions using Claude with retry logic"""
         if not transactions:
             return transactions
 
@@ -571,7 +571,35 @@ class ClaudeCategorizer:
                 'amount': tx.amount
             })
 
-        prompt = f"""You are a financial categorization assistant. Categorize each transaction into EXACTLY ONE of these categories (use the exact spelling):
+        # Try with detailed prompt first
+        success = self._try_categorize(transactions, tx_list, detailed=True)
+
+        # If failed, retry with simpler prompt
+        if not success:
+            print("\n" + "="*60)
+            print("RETRY: First attempt failed, trying simpler prompt...")
+            print("="*60 + "\n")
+            logger.warning("First categorization attempt failed, retrying with simpler prompt")
+            success = self._try_categorize(transactions, tx_list, detailed=False)
+
+        # If still failed, assign all to Other
+        if not success:
+            print("\n" + "="*60)
+            print("ERROR: Both categorization attempts failed, defaulting to 'Other'")
+            print("="*60 + "\n")
+            logger.error("Both categorization attempts failed, defaulting all to 'Other'")
+            for tx in transactions:
+                if not tx.category:
+                    tx.category = 'Other'
+                    tx.is_subscription = False
+
+        return transactions
+
+    def _try_categorize(self, transactions: List[Transaction], tx_list: List[Dict], detailed: bool = True) -> bool:
+        """Try to categorize transactions, return True if successful"""
+
+        if detailed:
+            prompt = f"""You are a financial categorization assistant. Categorize each transaction into EXACTLY ONE of these categories (use the exact spelling):
 
 Food & Dining
 Transport
@@ -581,12 +609,10 @@ Health
 Shopping
 Other
 
-Also identify which transactions are recurring subscriptions.
-
 Transactions to categorize:
 {json.dumps(tx_list, indent=2)}
 
-IMPORTANT: Return ONLY a valid JSON object with this EXACT structure (no other text):
+IMPORTANT: Return ONLY a valid JSON object with this EXACT structure (no markdown, no other text):
 {{
   "categorized": [
     {{"id": 0, "category": "Food & Dining", "is_subscription": false}},
@@ -594,28 +620,41 @@ IMPORTANT: Return ONLY a valid JSON object with this EXACT structure (no other t
   ]
 }}
 
-Categorization rules (BE SPECIFIC):
-- "Food & Dining": Restaurants, cafes, bars, food delivery (UberEats, DoorDash, SkipTheDishes), grocery stores, bakeries, fast food
-- "Transport": Uber, Lyft, taxis, gas stations, parking, public transit, car rental, automotive
-- "Bills & Utilities": Phone bills, internet, electricity, water, gas, cell phone, cable, insurance
-- "Entertainment": Netflix, Spotify, Apple Music, Disney+, gym memberships, movies, games, sports, concerts
-- "Health": Pharmacies, doctors, dentists, hospitals, medical supplies, health insurance, prescriptions
-- "Shopping": Amazon, clothing stores, electronics, home goods, department stores, online shopping
-- "Other": Anything that doesn't clearly fit the above categories
+Rules:
+- Food & Dining: Restaurants, cafes, grocery stores, food delivery
+- Transport: Uber, Lyft, gas stations, parking, transit
+- Bills & Utilities: Phone, internet, electricity, insurance
+- Entertainment: Netflix, Spotify, gym, movies, concerts
+- Health: Pharmacies, doctors, dentists, hospitals
+- Shopping: Amazon, clothing, electronics, home goods
+- Other: Everything else
 
-Subscription detection: Mark is_subscription=true ONLY for: streaming services (Netflix, Spotify, etc), gym memberships, phone/internet bills, insurance. NOT for one-time purchases.
+Subscriptions: Only mark streaming, gym, phone/internet as is_subscription=true
 
-Return the JSON now:"""
+Return ONLY the JSON object:"""
+        else:
+            # Simpler prompt for retry
+            prompt = f"""Categorize these transactions. Return ONLY valid JSON, no other text.
+
+Categories: Food & Dining, Transport, Bills & Utilities, Entertainment, Health, Shopping, Other
+
+Transactions: {json.dumps(tx_list, indent=2)}
+
+Return this exact format:
+{{"categorized": [{{"id": 0, "category": "Food & Dining", "is_subscription": false}}]}}"""
 
         try:
-            logger.info("="*60)
-            logger.info("CLAUDE CATEGORIZATION - SENDING REQUEST")
-            logger.info("="*60)
-            logger.info(f"Number of transactions to categorize: {len(transactions)}")
-            logger.info(f"Prompt (first 500 chars): {prompt[:500]}...")
-            logger.info(f"Transaction list sample (first 3):")
+            print("\n" + "="*80)
+            print("CLAUDE CATEGORIZATION REQUEST")
+            print("="*80)
+            print(f"Transactions to categorize: {len(transactions)}")
+            print(f"Using {'DETAILED' if detailed else 'SIMPLE'} prompt")
+            print(f"\nFirst 3 transactions:")
             for tx in tx_list[:3]:
-                logger.info(f"  {tx}")
+                print(f"  - {tx}")
+            print("="*80 + "\n")
+
+            logger.info(f"Sending categorization request to Claude (detailed={detailed})")
 
             message = self.client.messages.create(
                 model="claude-sonnet-4-6",
@@ -624,55 +663,86 @@ Return the JSON now:"""
             )
 
             response_text = message.content[0].text
-            logger.info("="*60)
-            logger.info("CLAUDE CATEGORIZATION - RECEIVED RESPONSE")
-            logger.info("="*60)
-            logger.info(f"Full Claude response:\n{response_text}")
-            logger.info("="*60)
 
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
+            print("\n" + "="*80)
+            print("CLAUDE RAW RESPONSE")
+            print("="*80)
+            print(response_text)
+            print("="*80 + "\n")
+
+            logger.info(f"Claude response received ({len(response_text)} chars)")
+
+            # Try multiple JSON extraction methods
+            result = None
+
+            # Method 1: Direct JSON parse (if response is pure JSON)
+            try:
+                result = json.loads(response_text.strip())
+                print("✓ Parsed JSON directly")
+            except json.JSONDecodeError:
+                pass
+
+            # Method 2: Extract JSON from markdown code blocks
+            if not result:
+                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group(1))
+                        print("✓ Extracted JSON from markdown code block")
+                    except json.JSONDecodeError:
+                        pass
+
+            # Method 3: Find any JSON object in the response
+            if not result:
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group())
+                        print("✓ Extracted JSON from response text")
+                    except json.JSONDecodeError:
+                        pass
+
+            if result and 'categorized' in result:
                 categorized = result.get('categorized', [])
 
-                logger.info(f"✓ Successfully parsed {len(categorized)} categorizations from Claude")
-                logger.info(f"Sample categorizations (first 5):")
+                print(f"\n✓ Successfully parsed {len(categorized)} categorizations")
+                print(f"\nFirst 5 categorizations:")
                 for item in categorized[:5]:
-                    logger.info(f"  ID {item.get('id')}: {item.get('category')} (sub: {item.get('is_subscription')})")
+                    print(f"  ID {item.get('id')}: {item.get('category')} (subscription: {item.get('is_subscription')})")
+                print()
 
+                # Apply categorizations
+                successful_assignments = 0
                 for item in categorized:
                     tx_id = item.get('id')
                     if tx_id is not None and tx_id < len(transactions):
                         category = item.get('category', 'Other')
-                        # Validate category is in allowed list
+
+                        # Validate category
                         if category not in CATEGORIES:
+                            print(f"⚠ Invalid category '{category}' for ID {tx_id}, using 'Other'")
                             logger.warning(f"Invalid category '{category}' from Claude, using 'Other'")
                             category = 'Other'
 
                         transactions[tx_id].category = category
                         transactions[tx_id].is_subscription = item.get('is_subscription', False)
-                        logger.debug(f"  Assigned: {transactions[tx_id].merchant} → {category}")
+                        successful_assignments += 1
+
+                print(f"✓ Applied {successful_assignments}/{len(transactions)} categorizations\n")
+                logger.info(f"Successfully applied {successful_assignments} categorizations")
+                return True
             else:
-                logger.error("✗ Could not extract JSON from Claude response")
-                logger.error(f"Full response: {response_text}")
-                # Fallback: assign all to Other
-                for tx in transactions:
-                    tx.category = 'Other'
-                    tx.is_subscription = False
+                print("✗ Could not find 'categorized' key in JSON response")
+                logger.error("Could not find 'categorized' key in parsed JSON")
+                return False
 
         except Exception as e:
-            logger.error(f"✗ Error categorizing with Claude: {e}")
+            print(f"\n✗ ERROR during categorization: {e}\n")
+            logger.error(f"Error during categorization attempt: {e}")
             import traceback
+            traceback.print_exc()
             logger.error(traceback.format_exc())
-            for tx in transactions:
-                if not tx.category:
-                    tx.category = 'Other'
-                    tx.is_subscription = False
-
-        logger.info("="*60)
-        logger.info("CATEGORIZATION COMPLETE")
-        logger.info("="*60)
-        return transactions
+            return False
 
 
 class DataStore:
