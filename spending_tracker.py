@@ -693,54 +693,333 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
     <title>Spending Report - {month_name}</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; padding: 20px; line-height: 1.6; }}
-        .container {{ max-width: 900px; margin: 0 auto; background: #1a1a2e; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }}
-        .header {{ background: linear-gradient(135deg, #16213e 0%, #0f3460 100%); padding: 40px; text-align: center; border-bottom: 2px solid #00d4aa; }}
-        .header h1 {{ font-size: 32px; font-weight: 700; color: #ffffff; margin-bottom: 20px; letter-spacing: -0.5px; }}
-        .header .total {{ font-size: 48px; font-weight: 800; color: #00d4aa; margin: 20px 0; }}
-        .header .ytd {{ font-size: 16px; color: #a0a0b0; margin-top: 10px; }}
-        .alert-box {{ background: #2a1a1a; border-left: 4px solid #ff4757; padding: 20px; margin: 20px 40px; border-radius: 8px; }}
-        .alert-box.positive {{ background: #1a2a1a; border-left-color: #00d4aa; }}
-        .alert-box h3 {{ color: #ff4757; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }}
-        .alert-box.positive h3 {{ color: #00d4aa; }}
-        .alert-box p {{ font-size: 18px; color: #ffffff; }}
-        .section {{ padding: 40px; }}
-        .section-title {{ font-size: 20px; font-weight: 700; color: #ffffff; margin-bottom: 24px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 2px solid #2a2a3e; padding-bottom: 12px; }}
-        .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 40px; }}
-        .card {{ background: #252538; border-radius: 12px; padding: 24px; border: 1px solid #2a2a3e; transition: transform 0.2s, box-shadow 0.2s; }}
-        .card:hover {{ transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0, 212, 170, 0.1); }}
-        .card-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }}
-        .card-title {{ font-size: 14px; color: #a0a0b0; text-transform: uppercase; letter-spacing: 0.5px; }}
-        .card-amount {{ font-size: 28px; font-weight: 700; color: #ffffff; margin: 8px 0; }}
-        .card-details {{ display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #808090; }}
-        .change {{ display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px; font-weight: 600; }}
-        .change.up {{ background: rgba(255, 71, 87, 0.15); color: #ff4757; }}
-        .change.down {{ background: rgba(0, 212, 170, 0.15); color: #00d4aa; }}
-        .merchants-list {{ background: #252538; border-radius: 12px; overflow: hidden; border: 1px solid #2a2a3e; }}
-        .merchant-item {{ display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid #2a2a3e; }}
-        .merchant-item:last-child {{ border-bottom: none; }}
-        .merchant-name {{ font-weight: 600; color: #ffffff; flex: 1; }}
-        .merchant-count {{ color: #808090; font-size: 13px; margin-right: 20px; }}
-        .merchant-amount {{ font-weight: 700; color: #00d4aa; min-width: 100px; text-align: right; }}
-        .subscriptions {{ background: #2a2a3e; border-radius: 12px; padding: 24px; border: 2px solid #00d4aa; }}
-        .subscription-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }}
-        .subscription-title {{ font-size: 18px; font-weight: 700; color: #00d4aa; }}
-        .subscription-total {{ font-size: 24px; font-weight: 700; color: #ffffff; }}
-        .subscription-list {{ display: grid; gap: 12px; }}
-        .subscription-item {{ display: flex; justify-content: space-between; padding: 12px 16px; background: #1a1a2e; border-radius: 8px; }}
-        .mom-summary {{ background: linear-gradient(135deg, #2a2a3e 0%, #1a1a2e 100%); border-radius: 12px; padding: 24px; text-align: center; margin-top: 20px; }}
-        .mom-summary h3 {{ color: #a0a0b0; font-size: 14px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }}
-        .mom-summary .value {{ font-size: 36px; font-weight: 700; color: #ffffff; }}
-        .footer {{ text-align: center; padding: 30px; color: #606070; font-size: 13px; border-top: 1px solid #2a2a3e; }}
-        .percentage {{ display: inline-block; min-width: 50px; text-align: right; color: #808090; }}
+
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0f0f1e;
+            color: #e5e7eb;
+            padding: 0;
+            line-height: 1.5;
+        }}
+
+        .container {{
+            max-width: 600px;
+            margin: 0 auto;
+            background: #1a1d2e;
+        }}
+
+        .header {{
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            padding: 32px 20px;
+            text-align: center;
+            border-bottom: 3px solid #10b981;
+        }}
+
+        .header h1 {{
+            font-size: 24px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 16px;
+        }}
+
+        .header .total {{
+            font-size: 42px;
+            font-weight: 800;
+            color: #10b981;
+            margin: 16px 0;
+        }}
+
+        .header .ytd {{
+            font-size: 14px;
+            color: #94a3b8;
+            margin-top: 8px;
+        }}
+
+        .section {{
+            padding: 24px 20px;
+            border-bottom: 1px solid #2a2f3e;
+        }}
+
+        .section-title {{
+            font-size: 16px;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+
+        .alert-box {{
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 4px solid #ef4444;
+            padding: 16px;
+            margin: 0 20px 20px 20px;
+            border-radius: 8px;
+        }}
+
+        .alert-box.positive {{
+            background: rgba(16, 185, 129, 0.1);
+            border-left-color: #10b981;
+        }}
+
+        .alert-box h3 {{
+            color: #ef4444;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+            font-weight: 700;
+        }}
+
+        .alert-box.positive h3 {{
+            color: #10b981;
+        }}
+
+        .alert-box p {{
+            font-size: 16px;
+            color: #f1f5f9;
+            font-weight: 600;
+        }}
+
+        .stat-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }}
+
+        .stat-card {{
+            background: #252938;
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid #2a2f3e;
+        }}
+
+        .stat-label {{
+            font-size: 11px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }}
+
+        .stat-value {{
+            font-size: 22px;
+            font-weight: 700;
+            color: #f1f5f9;
+        }}
+
+        .stat-change {{
+            font-size: 12px;
+            margin-top: 6px;
+            font-weight: 600;
+        }}
+
+        .stat-change.up {{ color: #ef4444; }}
+        .stat-change.down {{ color: #10b981; }}
+
+        .category-item {{
+            background: #252938;
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 10px;
+            border: 1px solid #2a2f3e;
+        }}
+
+        .category-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }}
+
+        .category-name {{
+            font-size: 14px;
+            font-weight: 600;
+            color: #f1f5f9;
+        }}
+
+        .category-amount {{
+            font-size: 16px;
+            font-weight: 700;
+            color: #10b981;
+        }}
+
+        .category-meta {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }}
+
+        .category-percent {{
+            color: #94a3b8;
+        }}
+
+        .badge {{
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+
+        .badge.up {{
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }}
+
+        .badge.down {{
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }}
+
+        .list-item {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #2a2f3e;
+        }}
+
+        .list-item:last-child {{
+            border-bottom: none;
+        }}
+
+        .list-name {{
+            font-size: 14px;
+            color: #f1f5f9;
+            font-weight: 500;
+            flex: 1;
+            padding-right: 12px;
+        }}
+
+        .list-amount {{
+            font-size: 15px;
+            font-weight: 700;
+            color: #10b981;
+            white-space: nowrap;
+        }}
+
+        .list-count {{
+            font-size: 11px;
+            color: #94a3b8;
+            margin-right: 8px;
+        }}
+
+        .subscription-box {{
+            background: rgba(16, 185, 129, 0.1);
+            border: 2px solid #10b981;
+            border-radius: 10px;
+            padding: 16px;
+        }}
+
+        .subscription-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }}
+
+        .subscription-title {{
+            font-size: 15px;
+            font-weight: 700;
+            color: #10b981;
+        }}
+
+        .subscription-total {{
+            font-size: 18px;
+            font-weight: 700;
+            color: #f1f5f9;
+        }}
+
+        .subscription-item {{
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: #252938;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }}
+
+        .subscription-item:last-child {{
+            margin-bottom: 0;
+        }}
+
+        .mom-box {{
+            background: linear-gradient(135deg, #252938 0%, #1a1d2e 100%);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }}
+
+        .mom-label {{
+            font-size: 12px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+        }}
+
+        .mom-value {{
+            font-size: 32px;
+            font-weight: 800;
+        }}
+
+        .quality-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 16px;
+        }}
+
+        .quality-stat {{
+            text-align: center;
+            padding: 12px;
+            background: #252938;
+            border-radius: 8px;
+        }}
+
+        .quality-stat-label {{
+            font-size: 10px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }}
+
+        .quality-stat-value {{
+            font-size: 18px;
+            font-weight: 700;
+            color: #10b981;
+        }}
+
+        .quality-stat-value.warn {{
+            color: #ef4444;
+        }}
+
+        .footer {{
+            text-align: center;
+            padding: 20px;
+            color: #64748b;
+            font-size: 11px;
+            border-top: 1px solid #2a2f3e;
+        }}
+
+        @media only screen and (max-width: 600px) {{
+            .header h1 {{ font-size: 20px; }}
+            .header .total {{ font-size: 36px; }}
+            .stat-grid {{ grid-template-columns: 1fr; }}
+            .quality-grid {{ grid-template-columns: 1fr; }}
+            .section {{ padding: 20px 16px; }}
+            .alert-box {{ margin: 0 16px 16px 16px; }}
+        }}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>💳 {month_name} Spending Report</h1>
+            <h1>💳 {month_name}</h1>
             <div class="total">${total_spent:,.2f}</div>
-            <div class="ytd">Year-to-Date: ${ytd_total:,.2f}</div>
+            <div class="ytd">YTD: ${ytd_total:,.2f}</div>
         </div>"""
 
     if biggest_change_category and biggest_change_amount != 0:
@@ -755,8 +1034,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
     html += """
         <div class="section">
-            <h2 class="section-title">Category Breakdown</h2>
-            <div class="cards">"""
+            <h2 class="section-title">Categories</h2>"""
 
     for category, amount in sorted_categories:
         percentage = (amount / total_spent * 100) if total_spent > 0 else 0
@@ -769,74 +1047,72 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                 cat_change_percent = (cat_change / prev_cat_amount * 100)
                 arrow = "↑" if cat_change > 0 else "↓"
                 change_class = "up" if cat_change > 0 else "down"
-                mom_category_change = f'<span class="change {change_class}">{arrow} {abs(cat_change_percent):.1f}%</span>'
+                mom_category_change = f'<span class="badge {change_class}">{arrow} {abs(cat_change_percent):.0f}%</span>'
             elif amount > 0:
-                mom_category_change = '<span class="change up">↑ NEW</span>'
+                mom_category_change = '<span class="badge up">NEW</span>'
 
         html += f"""
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">{category}</div>
-                    </div>
-                    <div class="card-amount">${amount:,.2f}</div>
-                    <div class="card-details">
-                        <span class="percentage">{percentage:.1f}%</span>
-                        {mom_category_change}
-                    </div>
-                </div>"""
+            <div class="category-item">
+                <div class="category-header">
+                    <div class="category-name">{category}</div>
+                    <div class="category-amount">${amount:,.2f}</div>
+                </div>
+                <div class="category-meta">
+                    <span class="category-percent">{percentage:.1f}% of total</span>
+                    {mom_category_change}
+                </div>
+            </div>"""
 
     html += """
-            </div>
         </div>"""
 
     if subscriptions:
         html += f"""
         <div class="section">
-            <div class="subscriptions">
+            <div class="subscription-box">
                 <div class="subscription-header">
-                    <div class="subscription-title">🔄 Recurring Subscriptions</div>
+                    <div class="subscription-title">🔄 Subscriptions</div>
                     <div class="subscription-total">${subscription_total:,.2f}/mo</div>
-                </div>
-                <div class="subscription-list">"""
+                </div>"""
 
         for sub in sorted(subscriptions, key=lambda x: x.amount, reverse=True):
             html += f"""
-                    <div class="subscription-item">
-                        <span>{sub.merchant}</span>
-                        <span style="color: #00d4aa; font-weight: 600;">${sub.amount:,.2f}</span>
-                    </div>"""
+                <div class="subscription-item">
+                    <span style="color: #f1f5f9; font-weight: 500;">{sub.merchant}</span>
+                    <span style="color: #10b981; font-weight: 700;">${sub.amount:,.2f}</span>
+                </div>"""
 
         html += """
-                </div>
             </div>
         </div>"""
 
     html += """
         <div class="section">
-            <h2 class="section-title">Top 10 Merchants</h2>
-            <div class="merchants-list">"""
+            <h2 class="section-title">Top Merchants</h2>"""
 
     for merchant, data in top_merchants:
         html += f"""
-                <div class="merchant-item">
-                    <div class="merchant-name">{merchant}</div>
-                    <div class="merchant-count">{data['count']} transaction{'s' if data['count'] > 1 else ''}</div>
-                    <div class="merchant-amount">${data['amount']:,.2f}</div>
-                </div>"""
+            <div class="list-item">
+                <div class="list-name">{merchant}</div>
+                <span class="list-count">{data['count']}×</span>
+                <div class="list-amount">${data['amount']:,.2f}</div>
+            </div>"""
 
     html += """
-            </div>
         </div>"""
 
     if mom_change is not None:
-        mom_color = "#ff4757" if mom_change > 0 else "#00d4aa"
+        mom_color = "#ef4444" if mom_change > 0 else "#10b981"
         mom_arrow = "↑" if mom_change > 0 else "↓"
         html += f"""
         <div class="section">
-            <div class="mom-summary">
-                <h3>Month-over-Month Change</h3>
-                <div class="value" style="color: {mom_color};">
-                    {mom_arrow} ${abs(mom_change):,.2f} ({mom_percent:+.1f}%)
+            <div class="mom-box">
+                <div class="mom-label">vs Last Month</div>
+                <div class="mom-value" style="color: {mom_color};">
+                    {mom_arrow} ${abs(mom_change):,.2f}
+                </div>
+                <div style="font-size: 14px; color: #94a3b8; margin-top: 8px;">
+                    {mom_percent:+.1f}% change
                 </div>
             </div>
         </div>"""
@@ -845,25 +1121,21 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
     if data_quality:
         html += """
         <div class="section">
-            <h2 class="section-title">📊 Data Quality Summary</h2>
-            <div style="background: #252538; border-radius: 12px; padding: 24px; border: 1px solid #2a2a3e;">
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
-                    <div>
-                        <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 8px;">Files Processed</div>
-                        <div style="color: #00d4aa; font-size: 24px; font-weight: 700;">{files}</div>
-                    </div>
-                    <div>
-                        <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 8px;">Total Transactions</div>
-                        <div style="color: #00d4aa; font-size: 24px; font-weight: 700;">{total}</div>
-                    </div>
-                    <div>
-                        <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 8px;">Skipped (Payments/Transfers)</div>
-                        <div style="color: #ff4757; font-size: 24px; font-weight: 700;">{skipped}</div>
-                    </div>
+            <h2 class="section-title">📊 Data Quality</h2>
+            <div class="quality-grid">
+                <div class="quality-stat">
+                    <div class="quality-stat-label">Files</div>
+                    <div class="quality-stat-value">{files}</div>
                 </div>
-                <div style="border-top: 1px solid #2a2a3e; padding-top: 20px;">
-                    <div style="color: #a0a0b0; font-size: 12px; text-transform: uppercase; margin-bottom: 12px;">Breakdown by Source</div>
-                    <div style="display: grid; gap: 8px;">
+                <div class="quality-stat">
+                    <div class="quality-stat-label">Found</div>
+                    <div class="quality-stat-value">{total}</div>
+                </div>
+                <div class="quality-stat">
+                    <div class="quality-stat-label">Skipped</div>
+                    <div class="quality-stat-value warn">{skipped}</div>
+                </div>
+            </div>
 """.format(
             files=data_quality.get('files_processed', 0),
             total=data_quality.get('total_found', 0),
@@ -874,22 +1146,19 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         source_breakdown = data_quality.get('source_breakdown', {})
         for source, count in sorted(source_breakdown.items(), key=lambda x: x[1], reverse=True):
             html += f"""
-                        <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: #1a1a2e; border-radius: 6px;">
-                            <span style="color: #e0e0e0;">{source}</span>
-                            <span style="color: #00d4aa; font-weight: 600;">{count} transactions</span>
-                        </div>"""
+            <div class="list-item">
+                <div class="list-name">{source}</div>
+                <div class="list-amount">{count} txns</div>
+            </div>"""
 
         html += """
-                    </div>
-                </div>
-            </div>
         </div>
         """
 
     html += f"""
         <div class="footer">
-            Generated by Spending Tracker on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}<br>
-            Tracking {len(transactions)} transactions across {len(category_totals)} categories
+            {len(transactions)} transactions · {len(category_totals)} categories<br>
+            {datetime.now().strftime('%b %d, %Y %I:%M %p')}
         </div>
     </div>
 </body>
