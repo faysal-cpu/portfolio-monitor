@@ -1113,14 +1113,39 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
     <style>
         @media (prefers-color-scheme: light) {{
             body {{ color: #1a1a1f !important; }}
-            div[style*="color: #ffffff"] {{
+
+            /* Fix all white text to dark in light mode */
+            div[style*="color: #ffffff"],
+            div[style*="color:#ffffff"] {{
                 color: #1a1a1f !important;
             }}
-            div[style*="color: #8b8b9a"] {{
-                color: #6a6a78 !important;
+
+            /* Fix all gray text to dark gray in light mode */
+            div[style*="color: #8b8b9a"],
+            div[style*="color:#8b8b9a"] {{
+                color: #4a4a5a !important;
             }}
-            div[style*="background: #1e1e2e"] {{
-                background: #e8e8f0 !important;
+
+            /* Fix card backgrounds to light */
+            div[style*="background: #1e1e2e"],
+            div[style*="background:#1e1e2e"] {{
+                background: #f5f5f7 !important;
+            }}
+
+            /* Keep teal visible in light mode */
+            div[style*="color: #00d4aa"],
+            div[style*="color:#00d4aa"] {{
+                color: #00a882 !important;
+            }}
+
+            /* Fix header gradient for light mode */
+            div[style*="background: linear-gradient(135deg, #1a1a2e"] {{
+                background: linear-gradient(135deg, #e8ecf1 0%, #f5f7fa 100%) !important;
+            }}
+
+            /* Ensure main total is visible */
+            div[style*="font-size: 52px"] {{
+                color: #1a1a1f !important;
             }}
         }}
     </style>
