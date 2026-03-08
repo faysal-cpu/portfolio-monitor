@@ -558,40 +558,64 @@ class ClaudeCategorizer:
         self.client = anthropic.Anthropic(api_key=api_key)
 
     def categorize_transactions(self, transactions: List[Transaction]) -> List[Transaction]:
-        """Batch categorize transactions using Claude with retry logic"""
+        """Batch categorize transactions using Claude with retry logic (50 per batch)"""
         if not transactions:
             return transactions
 
-        tx_list = []
-        for i, tx in enumerate(transactions):
-            tx_list.append({
-                'id': i,
-                'merchant': tx.merchant,
-                'description': tx.description,
-                'amount': tx.amount
-            })
+        # Split into batches of 50 to avoid rate limits
+        BATCH_SIZE = 50
+        total_transactions = len(transactions)
 
-        # Try with detailed prompt first
-        success = self._try_categorize(transactions, tx_list, detailed=True)
+        print(f"\n{'='*80}")
+        print(f"CATEGORIZATION: Processing {total_transactions} transactions in batches of {BATCH_SIZE}")
+        print(f"{'='*80}\n")
+        logger.info(f"Processing {total_transactions} transactions in batches of {BATCH_SIZE}")
 
-        # If failed, retry with simpler prompt
-        if not success:
-            print("\n" + "="*60)
-            print("RETRY: First attempt failed, trying simpler prompt...")
-            print("="*60 + "\n")
-            logger.warning("First categorization attempt failed, retrying with simpler prompt")
-            success = self._try_categorize(transactions, tx_list, detailed=False)
+        for batch_start in range(0, total_transactions, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, total_transactions)
+            batch_transactions = transactions[batch_start:batch_end]
 
-        # If still failed, assign all to Other
-        if not success:
-            print("\n" + "="*60)
-            print("ERROR: Both categorization attempts failed, defaulting to 'Other'")
-            print("="*60 + "\n")
-            logger.error("Both categorization attempts failed, defaulting all to 'Other'")
-            for tx in transactions:
-                if not tx.category:
-                    tx.category = 'Other'
-                    tx.is_subscription = False
+            print(f"\n{'='*80}")
+            print(f"BATCH {batch_start//BATCH_SIZE + 1}: Processing transactions {batch_start+1}-{batch_end} of {total_transactions}")
+            print(f"{'='*80}\n")
+            logger.info(f"Processing batch {batch_start//BATCH_SIZE + 1}: transactions {batch_start+1}-{batch_end}")
+
+            # Build transaction list with original IDs
+            tx_list = []
+            for i, tx in enumerate(batch_transactions):
+                tx_list.append({
+                    'id': i,  # Local batch ID
+                    'merchant': tx.merchant,
+                    'description': tx.description,
+                    'amount': tx.amount
+                })
+
+            # Try with detailed prompt first
+            success = self._try_categorize(batch_transactions, tx_list, detailed=True)
+
+            # If failed, retry with simpler prompt
+            if not success:
+                print("\n" + "="*60)
+                print(f"RETRY BATCH {batch_start//BATCH_SIZE + 1}: First attempt failed, trying simpler prompt...")
+                print("="*60 + "\n")
+                logger.warning(f"Batch {batch_start//BATCH_SIZE + 1} categorization failed, retrying with simpler prompt")
+                success = self._try_categorize(batch_transactions, tx_list, detailed=False)
+
+            # If still failed, assign all to Other
+            if not success:
+                print("\n" + "="*60)
+                print(f"ERROR BATCH {batch_start//BATCH_SIZE + 1}: Both attempts failed, defaulting to 'Other'")
+                print("="*60 + "\n")
+                logger.error(f"Batch {batch_start//BATCH_SIZE + 1} categorization failed, defaulting to 'Other'")
+                for tx in batch_transactions:
+                    if not tx.category:
+                        tx.category = 'Other'
+                        tx.is_subscription = False
+
+        print(f"\n{'='*80}")
+        print(f"CATEGORIZATION COMPLETE: Processed all {total_transactions} transactions")
+        print(f"{'='*80}\n")
+        logger.info(f"Completed categorization of all {total_transactions} transactions")
 
         return transactions
 
