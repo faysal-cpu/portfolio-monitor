@@ -98,7 +98,9 @@ HISTORY_FILE = DATA_DIR / 'monthly_history.json'
 # Categories
 CATEGORIES = [
     "Food & Dining",
+    "Groceries",
     "Transport",
+    "Travel",
     "Bills & Utilities",
     "Entertainment",
     "Health",
@@ -145,7 +147,7 @@ class CSVParser:
         filename_lower = filename.lower()
 
         # TD special case: no headers, detect by filename
-        if not headers and filename_lower.startswith('accountactivit'):
+        if not headers and (filename_lower.startswith('accountactivit') or 'visa' in filename_lower):
             return 'td'
 
         # Use HEADERS ONLY for all other banks
@@ -414,8 +416,12 @@ class CSVParser:
 
                 amount = CSVParser._parse_amount(amount_str)
 
-                # Negative = spending for TD
-                if amount >= 0:
+                # Skip payments to the credit card
+                if 'ROYAL BANK OF CANADA' in description.upper():
+                    skipped += 1
+                    continue
+
+                if 'PAYMENT' in description.upper():
                     skipped += 1
                     continue
 
@@ -1095,7 +1101,7 @@ def normalize_merchant_name(merchant: str) -> str:
 def clean_merchant_for_display(merchant: str) -> str:
     """Clean merchant name for display - remove location codes, numbers, extra info"""
     clean = re.sub(r'#\d+', '', merchant)  # Remove #43, #524
-    clean = re.sub(r'W\d+', '', clean)  # Remove W524, W1316
+    clean = re.sub(r'\s+W\d+', '', clean)  # Remove trailing " W524" patterns only
     clean = re.sub(r'\*+\d+', '', clean)  # Remove ****1770
     clean = re.sub(r'\d{2}/\d{2}', '', clean)  # Remove dates
     clean = re.sub(r'\s+[A-Z]{2}$', '', clean)  # Remove trailing state codes
@@ -1149,13 +1155,24 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
                        'MIAMI', 'NAPLES', 'FORT LAUDERDA', 'WILTON MANORS']
 
     def is_foreign(tx):
-        # Check merchant country code in raw data
+        # Check raw data for country code (Rogers Mastercard)
         country_code = tx.raw_data.get('Merchant Country Code', '').upper()
-        if country_code in foreign_countries:
+        if country_code and country_code not in ['CAN', '']:
             return True
-        # Check keywords in merchant and description
+        # Check currency field (Wealthsimple CC)
+        currency = tx.raw_data.get('currency', '').upper()
+        if currency and currency != 'CAD':
+            return True
+        # Check merchant/description text for foreign location indicators
         text = (tx.description + ' ' + tx.merchant).upper()
-        return any(kw in text for kw in foreign_keywords)
+        foreign_indicators = [
+            'DUBAI', 'ABU DHABI', 'UAE', 'MIAMI', 'FLORIDA', 'NAPLES', 'FORT LAUDERDA',
+            'WILTON MANORS', 'MEXICO', 'CANCUN', 'ISLA MUJELES', 'CIUDAD DE MEX',
+            'MERPAGO', 'OXXO', 'SUPERCHE', 'ALAJUELA', 'COSTA RICA',
+            'IRELAND', 'LONDON', 'STOCKHOLM', 'SAN FRANCISCO', 'NEW YORK',
+            'NAPLES FL', 'BENITO JUAREZ'
+        ]
+        return any(indicator in text for indicator in foreign_indicators)
 
     foreign_txs = [tx for tx in positive_txs if is_foreign(tx)]
     foreign_total = sum(tx.amount for tx in foreign_txs)
@@ -1196,12 +1213,12 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
         month_key = f"{year_offset}-{month_offset:02d}"
         if month_key in history:
             month_data = history[month_key]
-            # Reconstruct transactions from stored data
-            for merchant, amount in month_data.get('merchant_totals', {}).items():
+            # Use actual individual transaction dates from stored history
+            for tx_dict in month_data.get('transactions', []):
                 all_transactions.append({
-                    'merchant': merchant,
-                    'amount': amount,
-                    'date': datetime(year_offset, month_offset, 15)  # Approximate mid-month
+                    'merchant': tx_dict['merchant'],
+                    'amount': tx_dict['amount'],
+                    'date': datetime.fromisoformat(tx_dict['date'])
                 })
 
     # Group by normalized merchant name
@@ -1215,8 +1232,8 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
     subscriptions = []
 
     for normalized_merchant, txs in merchant_groups.items():
-        # NEW: 2+ months minimum (changed from 3)
-        if len(txs) < 2:
+        # Require 3+ occurrences to reduce false positives
+        if len(txs) < 3:
             continue
 
         # Skip payment/cashback/refunds (ENHANCED filtering)
@@ -1234,7 +1251,7 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
         # FILTER OUT NEGATIVE AMOUNTS (refunds/cashback)
         txs_sorted = [tx for tx in txs_sorted if tx['amount'] > 0]
 
-        if len(txs_sorted) < 2:  # NEW: 2+ positive charges (not 3)
+        if len(txs_sorted) < 3:  # Require 3+ positive charges to avoid false positives
             continue
 
         # Check for consistent amount (allow small variation for taxes/fees)
@@ -2195,6 +2212,19 @@ def run_spending_analysis():
 
         all_transactions.sort(key=lambda x: x.date)
 
+        # Deduplicate transactions (overlapping CSV files cause duplicates)
+        seen = set()
+        deduped = []
+        for tx in all_transactions:
+            key = (tx.date.date(), round(tx.amount, 2), tx.merchant[:30].upper().strip(), tx.source)
+            if key not in seen:
+                seen.add(key)
+                deduped.append(tx)
+            else:
+                logger.warning(f"Duplicate removed: {tx.date.date()} | {tx.merchant} | ${tx.amount} | {tx.source}")
+        all_transactions = deduped
+        logger.info(f"After deduplication: {len(all_transactions)} unique transactions")
+
         logger.info(f"Categorizing {len(all_transactions)} transactions with Claude AI...")
         all_transactions = categorizer.categorize_transactions(all_transactions)
         logger.info("✓ Categorization complete\n")
@@ -2288,6 +2318,18 @@ def regenerate_month_email(year: int, month: int):
 
 def main():
     """Main entry point with scheduler"""
+
+    # Check for --reset flag to clear all historical data
+    if '--reset' in sys.argv:
+        import shutil
+        if HISTORY_FILE.exists():
+            HISTORY_FILE.unlink()
+            logger.info("✓ Cleared monthly_history.json")
+        if PROCESSED_DIR.exists():
+            shutil.rmtree(PROCESSED_DIR)
+            logger.info("✓ Cleared processed_csvs markers")
+        logger.info("Reset complete. Run with --now to reprocess all files.")
+        return
 
     # Check for --month flag to regenerate specific month
     if '--month' in sys.argv:
