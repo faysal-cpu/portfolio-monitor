@@ -929,8 +929,19 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
         if len(txs) < 3:  # Must appear at least 3 times
             continue
 
+        # Skip cashback, refunds, and other non-subscription patterns
+        skip_keywords = ['cashback', 'remises', 'refund', 'credit', 'return', 'reimbursement']
+        if any(keyword in normalized_merchant.lower() for keyword in skip_keywords):
+            continue
+
         # Sort by date
         txs_sorted = sorted(txs, key=lambda x: x['date'])
+
+        # FILTER OUT NEGATIVE AMOUNTS (refunds/cashback) - these are NOT subscriptions
+        txs_sorted = [tx for tx in txs_sorted if tx['amount'] > 0]
+
+        if len(txs_sorted) < 3:  # Need at least 3 positive charges
+            continue
 
         # Check if amounts are within 20% variation
         amounts = [tx['amount'] for tx in txs_sorted]
@@ -1321,7 +1332,21 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             }}
 
             .header {{
-                background: linear-gradient(135deg, #4c5fd5 0%, #6147a3 100%) !important;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            }}
+
+            .header-title {{
+                color: #ffffff !important;
+                opacity: 1 !important;
+            }}
+
+            .header-amount {{
+                color: #ffffff !important;
+            }}
+
+            .header-subtitle {{
+                color: #ffffff !important;
+                opacity: 0.95 !important;
             }}
 
             .content {{
