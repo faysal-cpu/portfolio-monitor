@@ -1158,44 +1158,59 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
                        'MIAMI', 'NAPLES', 'FORT LAUDERDA', 'WILTON MANORS']
 
     def is_foreign(tx):
-        # Check raw data for country code (Rogers Mastercard has this)
-        country_code = tx.raw_data.get('Merchant Country Code', '').upper()
+        # Rogers Mastercard: check Merchant Country Code field directly
+        country_code = tx.raw_data.get('Merchant Country Code', '').upper().strip()
         if country_code and country_code not in ['CAN', '']:
             return True
 
-        # Check merchant city/state from Rogers raw data
+        # Rogers Mastercard: check Merchant City for known foreign cities
         merchant_city = tx.raw_data.get('Merchant City', '').upper()
-        merchant_state = tx.raw_data.get('Merchant State or Province', '').upper()
-        foreign_cities = ['MIAMI', 'MIAMI BEACH', 'FORT LAUDERDA', 'NAPLES', 'WILTON MANORS',
-                          'SAN FRANCISCO', 'DUBAI', 'ABU DHABI', 'ABUDHABI', 'CANCUN',
-                          'CIUDAD DE MEX', 'ISLA MUJERES', 'BENITO JUAREZ', 'ALAJUELA',
-                          'LIMASSOL', 'EDMONTON INTE']
+        foreign_cities = [
+            'MIAMI', 'MIAMI BEACH', 'FORT LAUDERDA', 'FT LAUDERDALE',
+            'NAPLES', 'WILTON MANORS', 'SAN FRANCISCO', 'NEW YORK',
+            'DUBAI', 'ABU DHABI', 'ABUDHABI', 'CANCUN', 'CIUDAD DE MEX',
+            'ISLA MUJERES', 'BENITO JUAREZ', 'ALAJUELA', 'LIMASSOL',
+            'EDMONTON INTE', 'PHOENIX', 'CHICAGO',
+        ]
         if any(city in merchant_city for city in foreign_cities):
             return True
 
-        # For Wealthsimple CC and Amex: check merchant name/description text
-        # These banks don't store country codes, so we use merchant name patterns
+        # Wealthsimple CC and Amex: no country code available, use merchant name patterns
         text = (tx.description + ' ' + tx.merchant).upper()
         foreign_indicators = [
-            # Mexico - specific patterns from Wealthsimple CC Mexico transactions
+            # Mexico
             'MERPAGO', 'OXXO', 'SUPERCHE', 'CANCUN', 'CIUDAD DE MEX',
             'ISLA MUJERES', 'ISLA MUJER', 'BENITO JUAREZ',
-            'CHICHIS AND CHARLIES', 'REST MONKEY BUSINESS', 'REST MEXTREME',
-            'REST PALAPITA', 'MANGO CAFE', 'ABARROTES', 'ESPIRAL',
-            'TICKET TOURS MXN', 'DLO*DIDI', 'D LOCAL*DIDI',
-            # Travel data SIM (used internationally)
+            'CHICHIS AND CHARLIES', 'REST MONKEY BUSINESS',
+            'REST MEXTREME', 'REST PALAPITA', 'MANGO CAFE',
+            'ABARROTES', 'ESPIRAL', 'TICKET TOURS MXN',
+            'DLO*DIDI', 'D LOCAL*DIDI', 'SELINA CANCUN',
+            'PAYPAL *CANCUNSCUBA', 'HERTZ WAL MART CANCUN',
+            # International data SIM
             'GIGSKY',
             # Middle East
-            'DUBAI', 'ABU DHABI', 'ABUDHABI', 'TALABAT', 'QLUB', 'CPAY-NOW-AED',
-            'TRYANO', 'AJMAL', 'ALMANDOOS', 'ARABIAN HOUSE', 'ADNOC',
-            # USA locations (for Amex which doesn't have country codes)
-            'MIAMI', 'FLORIDA', 'FORT LAUDERDA', 'WILTON MANORS', 'NAPLES FL',
+            'DUBAI', 'ABU DHABI', 'ABUDHABI', 'TALABAT', 'QLUB',
+            'CPAY-NOW-AED', 'TRYANO', 'AJMAL', 'ALMANDOOS',
+            'ARABIAN HOUSE', 'ADNOC', 'FIVE HOTEL',
+            # USA locations (for Amex which has no country code)
+            'MIAMI', 'MIAMI BEACH', 'FORT LAUDERDA', 'WILTON MANORS',
+            'NAPLES FL', 'TST* SHANE', 'CHELSEA HOTEL',
+            'ROSETTA BAKERY', 'CASABLANCA CAFE', 'LSU CAVALIER',
+            'DRYNK BAR', 'TST*EAGLE BAR', 'TST*HUNTERS',
+            'BAILEYS LIQUORS', 'EJS BAYFRONT', 'FOUR SEASONS SUNSET',
+            'BRIGHTLINE', 'LAS OLAS', 'MY TROPX', 'SEA SIDE',
+            'ROSA SKY', 'TACO BELL', 'NICKS PIZZA', 'SUGAR',
+            'CVS/PHARMACY', 'GELATO', 'TST*OSTERIA TULIA',
+            'WESTIN BEACH', 'CLUB FT LAUDERDALE', 'GROUPON',
+            'GB UNIVERSAL', 'HELLOWISP', 'LYFT',
             # Costa Rica
-            'ALAJUELA', 'COSTA RICA',
+            'ALAJUELA', 'BUDGET RENT A CAR',
             # Europe
-            'SOLIHULL', 'STOCKHOLM',
-            # Hotels/services with foreign city in name
-            'SELINA CANCUN', 'CHELSEA HOTEL', 'RADISSON BLU',
+            'SOLIHULL', 'STOCKHOLM', 'NETLIFY',
+            # Netherlands
+            'BERGHEM', 'SP ALCANSIDE',
+            # Amazon Dubai
+            'AMAZON (MARKET PLACE-EC',
         ]
         return any(indicator in text for indicator in foreign_indicators)
 
