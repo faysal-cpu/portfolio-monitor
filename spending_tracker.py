@@ -586,6 +586,106 @@ class GoogleDriveMonitor:
         }))
 
 
+def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
+    """Fast keyword-based categorization - deterministic and reliable"""
+    text = f"{merchant} {description}".upper()
+
+    # STEP 1: GROCERIES
+    grocery_keywords = [
+        'COSTCO WHOLESALE', 'COSTCO W', 'NO FRILLS', 'NOFRILLS', 'FARM BOY', 'FARMBOY',
+        'LOBLAWS', 'LOBLAW', 'METRO', 'SOBEYS', 'SOBEY', 'FOOD BASICS', 'FOODBASICS',
+        'FRESHCO', 'FRESH CO', 'LONGOS', 'LONGO', 'FORTINOS', 'WALMART GROCERY',
+        'WALMART SUPERCENTRE', 'SUPERSTORE', 'REAL CANADIAN SUPERSTORE', 'T&T SUPERMARKET',
+        'WHOLE FOODS', 'INDEPENDENT GROCER', 'YOUR INDEPENDENT', 'VALU-MART', 'VALUMART',
+        'ZEHRS', 'SUPERMARKET', 'GROCERY STORE'
+    ]
+    # Exclude Costco Gas from groceries
+    if 'COSTCO GAS' not in text and 'COSTCO FUEL' not in text:
+        for keyword in grocery_keywords:
+            if keyword in text:
+                return 'Groceries'
+
+    # STEP 2: TRAVEL (airlines, hotels, booking sites)
+    travel_keywords = [
+        'FLAIR', 'PORTER', 'PORTERAIR', 'AIR CANADA', 'AIRCANADA', 'WESTJET',
+        'UNITED AIRLINES', 'UNITED AIR', 'DELTA AIRLINES', 'DELTA AIR',
+        'AMERICAN AIRLINES', 'AA.COM', 'SOUTHWEST', 'ALLEGIANT', 'SPIRIT AIRLINES',
+        'FRONTIER', 'BRITISH AIRWAYS', 'LUFTHANSA', 'KLM', 'EXPEDIA', 'BOOKING.COM',
+        'HOTELS.COM', 'AIRBNB', 'MARRIOTT', 'HILTON', 'HYATT', 'HOLIDAY INN',
+        'ZENHOTELS', 'TRIVAGO', 'KAYAK'
+    ]
+    for keyword in travel_keywords:
+        if keyword in text:
+            return 'Travel'
+
+    # STEP 3: TRANSPORT (ground transportation, gas, parking)
+    transport_keywords = [
+        'UBER', 'LYFT', 'TAXI', 'CAB', 'PARKING TICKET', 'PARKING METER', 'GREEN P',
+        'TTC', 'GO TRANSIT', 'PRESTO', 'SHELL', 'ESSO', 'PETRO-CANADA',
+        'CANADIAN TIRE GAS', 'COSTCO GAS', 'COSTCO FUEL', 'ZIPCAR', 'CAR2GO',
+        'ENTERPRISE RENT'
+    ]
+    # Also check for generic gas/fuel indicators
+    if any(keyword in text for keyword in transport_keywords):
+        return 'Transport'
+    if ('GAS' in text or 'FUEL' in text or 'PETROL' in text) and 'STATION' in text:
+        return 'Transport'
+
+    # STEP 4: BILLS & UTILITIES
+    bills_keywords = [
+        'ROGERS', 'BELL CANADA', 'TELUS', 'FIDO', 'KOODO', 'ENBRIDGE',
+        'TORONTO HYDRO', 'HYDRO ONE', 'MEMBERSHIP FEE', 'ANNUAL FEE',
+        'INSTALLMENT', 'INSURANCE', 'COOPERATORS', 'DUUO'
+    ]
+    for keyword in bills_keywords:
+        if keyword in text:
+            return 'Bills & Utilities'
+
+    # STEP 5: HEALTH (exclude veterinary)
+    if not any(vet_keyword in text for vet_keyword in ['VET', 'VETERINARY', 'ANIMAL']):
+        health_keywords = [
+            'PHARMACY', 'PHARMA', 'SHOPPERS DRUG MART', 'REXALL', 'ORTHODONTIC',
+            'ORTHO', 'DENTAL', 'DENTIST', 'MEDICAL', 'CLINIC', 'HOSPITAL',
+            'DR ', 'DOCTOR', 'OPTOMETRY', 'VISION CARE', 'EYE CARE'
+        ]
+        for keyword in health_keywords:
+            if keyword in text:
+                return 'Health'
+
+    # STEP 6: ENTERTAINMENT
+    entertainment_keywords = [
+        'NETFLIX', 'SPOTIFY', 'DISNEY', 'APPLE TV', 'AMAZON PRIME VIDEO',
+        'MIRVISH', 'CINEPLEX', 'LANDMARK CINEMA', 'GOODLIFE', 'LA FITNESS',
+        'YMCA', 'GYM', 'THEATRE', 'THEATER', 'CONCERT'
+    ]
+    for keyword in entertainment_keywords:
+        if keyword in text:
+            return 'Entertainment'
+
+    # STEP 7: FOOD & DINING
+    dining_keywords = [
+        'RESTAURANT', 'BISTRO', 'CAFE', 'COFFEE', 'BAR', 'PUB', 'STARBUCKS',
+        'TIM HORTONS', 'SECOND CUP', 'MCDONALD', 'BURGER KING', 'WENDY',
+        'KFC', 'SUBWAY', 'PIZZA', 'UBEREATS', 'DOORDASH', 'SKIP THE DISHES',
+        'FOODORA'
+    ]
+    for keyword in dining_keywords:
+        if keyword in text:
+            return 'Food & Dining'
+
+    # STEP 8: SHOPPING
+    shopping_keywords = [
+        'AMAZON.CA', 'AMAZON.COM', 'AMZN', 'BEST BUY', 'STAPLES', 'HOME DEPOT',
+        'CANADIAN TIRE', 'H&M', 'ZARA', 'WINNERS', 'MARSHALLS', 'TARGET'
+    ]
+    for keyword in shopping_keywords:
+        if keyword in text:
+            return 'Shopping'
+
+    # No keyword match - return None to send to Claude
+    return None
+
+
 class ClaudeCategorizer:
     """Use Claude AI to categorize transactions"""
 
@@ -593,64 +693,99 @@ class ClaudeCategorizer:
         self.client = anthropic.Anthropic(api_key=api_key)
 
     def categorize_transactions(self, transactions: List[Transaction]) -> List[Transaction]:
-        """Batch categorize transactions using Claude with retry logic (50 per batch)"""
+        """Hybrid categorization: keywords first, then Claude for unclear merchants"""
         if not transactions:
             return transactions
 
-        # Split into batches of 50 to avoid rate limits
-        BATCH_SIZE = 50
-        total_transactions = len(transactions)
-
+        # PHASE 1: Keyword-based categorization (fast, deterministic)
         print(f"\n{'='*80}")
-        print(f"CATEGORIZATION: Processing {total_transactions} transactions in batches of {BATCH_SIZE}")
+        print(f"PHASE 1: KEYWORD CATEGORIZATION - Processing {len(transactions)} transactions")
         print(f"{'='*80}\n")
-        logger.info(f"Processing {total_transactions} transactions in batches of {BATCH_SIZE}")
+        logger.info(f"Starting keyword categorization for {len(transactions)} transactions")
 
-        for batch_start in range(0, total_transactions, BATCH_SIZE):
-            batch_end = min(batch_start + BATCH_SIZE, total_transactions)
-            batch_transactions = transactions[batch_start:batch_end]
+        keyword_categorized = 0
+        unclear_transactions = []
+
+        for tx in transactions:
+            category = categorize_by_keywords(tx.merchant, tx.description)
+            if category:
+                tx.category = category
+                keyword_categorized += 1
+            else:
+                unclear_transactions.append(tx)
+
+        print(f"✓ Keyword categorization complete:")
+        print(f"  - {keyword_categorized} transactions categorized by keywords")
+        print(f"  - {len(unclear_transactions)} unclear transactions need Claude AI")
+        logger.info(f"Keyword categorization: {keyword_categorized} categorized, {len(unclear_transactions)} unclear")
+
+        # PHASE 2: Claude AI for unclear transactions only
+        if unclear_transactions:
+            print(f"\n{'='*80}")
+            print(f"PHASE 2: CLAUDE AI CATEGORIZATION - Processing {len(unclear_transactions)} unclear transactions")
+            print(f"{'='*80}\n")
+            logger.info(f"Starting Claude AI categorization for {len(unclear_transactions)} unclear transactions")
+
+            # Split into batches of 50 to avoid rate limits
+            BATCH_SIZE = 50
+            total_unclear = len(unclear_transactions)
+
+            for batch_start in range(0, total_unclear, BATCH_SIZE):
+                batch_end = min(batch_start + BATCH_SIZE, total_unclear)
+                batch_transactions = unclear_transactions[batch_start:batch_end]
+
+                print(f"\n{'='*60}")
+                print(f"BATCH {batch_start//BATCH_SIZE + 1}: Processing {batch_start+1}-{batch_end} of {total_unclear} unclear transactions")
+                print(f"{'='*60}\n")
+                logger.info(f"Processing batch {batch_start//BATCH_SIZE + 1}: transactions {batch_start+1}-{batch_end}")
+
+                # Build transaction list with original IDs
+                tx_list = []
+                for i, tx in enumerate(batch_transactions):
+                    tx_list.append({
+                        'id': i,  # Local batch ID
+                        'merchant': tx.merchant,
+                        'description': tx.description,
+                        'amount': tx.amount
+                    })
+
+                # Try with detailed prompt first
+                success = self._try_categorize(batch_transactions, tx_list, detailed=True)
+
+                # If failed, retry with simpler prompt
+                if not success:
+                    print("\n" + "="*60)
+                    print(f"RETRY BATCH {batch_start//BATCH_SIZE + 1}: First attempt failed, trying simpler prompt...")
+                    print("="*60 + "\n")
+                    logger.warning(f"Batch {batch_start//BATCH_SIZE + 1} categorization failed, retrying with simpler prompt")
+                    success = self._try_categorize(batch_transactions, tx_list, detailed=False)
+
+                # If still failed, assign all to Other
+                if not success:
+                    print("\n" + "="*60)
+                    print(f"ERROR BATCH {batch_start//BATCH_SIZE + 1}: Both attempts failed, defaulting to 'Other'")
+                    print("="*60 + "\n")
+                    logger.error(f"Batch {batch_start//BATCH_SIZE + 1} categorization failed, defaulting to 'Other'")
+                    for tx in batch_transactions:
+                        if not tx.category:
+                            tx.category = 'Other'
+                            tx.is_subscription = False
 
             print(f"\n{'='*80}")
-            print(f"BATCH {batch_start//BATCH_SIZE + 1}: Processing transactions {batch_start+1}-{batch_end} of {total_transactions}")
+            print(f"PHASE 2 COMPLETE: Claude AI categorized {len(unclear_transactions)} transactions")
             print(f"{'='*80}\n")
-            logger.info(f"Processing batch {batch_start//BATCH_SIZE + 1}: transactions {batch_start+1}-{batch_end}")
-
-            # Build transaction list with original IDs
-            tx_list = []
-            for i, tx in enumerate(batch_transactions):
-                tx_list.append({
-                    'id': i,  # Local batch ID
-                    'merchant': tx.merchant,
-                    'description': tx.description,
-                    'amount': tx.amount
-                })
-
-            # Try with detailed prompt first
-            success = self._try_categorize(batch_transactions, tx_list, detailed=True)
-
-            # If failed, retry with simpler prompt
-            if not success:
-                print("\n" + "="*60)
-                print(f"RETRY BATCH {batch_start//BATCH_SIZE + 1}: First attempt failed, trying simpler prompt...")
-                print("="*60 + "\n")
-                logger.warning(f"Batch {batch_start//BATCH_SIZE + 1} categorization failed, retrying with simpler prompt")
-                success = self._try_categorize(batch_transactions, tx_list, detailed=False)
-
-            # If still failed, assign all to Other
-            if not success:
-                print("\n" + "="*60)
-                print(f"ERROR BATCH {batch_start//BATCH_SIZE + 1}: Both attempts failed, defaulting to 'Other'")
-                print("="*60 + "\n")
-                logger.error(f"Batch {batch_start//BATCH_SIZE + 1} categorization failed, defaulting to 'Other'")
-                for tx in batch_transactions:
-                    if not tx.category:
-                        tx.category = 'Other'
-                        tx.is_subscription = False
+        else:
+            print(f"\n{'='*80}")
+            print(f"✓ ALL TRANSACTIONS CATEGORIZED BY KEYWORDS - No Claude AI needed!")
+            print(f"{'='*80}\n")
 
         print(f"\n{'='*80}")
-        print(f"CATEGORIZATION COMPLETE: Processed all {total_transactions} transactions")
+        print(f"CATEGORIZATION COMPLETE:")
+        print(f"  - Total transactions: {len(transactions)}")
+        print(f"  - Keyword categorized: {keyword_categorized}")
+        print(f"  - Claude AI categorized: {len(unclear_transactions)}")
         print(f"{'='*80}\n")
-        logger.info(f"Completed categorization of all {total_transactions} transactions")
+        logger.info(f"Categorization complete: {keyword_categorized} by keywords, {len(unclear_transactions)} by Claude AI")
 
         return transactions
 
@@ -679,25 +814,98 @@ IMPORTANT: Return ONLY a valid JSON object with this EXACT structure (no markdow
   ]
 }}
 
-Rules:
-- Groceries: Supermarkets and grocery stores where you buy ingredients to cook at home (No Frills, Loblaws, Costco Wholesale, Longos, Farm Boy, Metro, Sobeys, Food Basics, FreshCo, Walmart Grocery). ALL Costco Wholesale purchases go to Groceries (not Shopping).
-- Food & Dining: Restaurants, cafes, bars, fast food, food delivery services (UberEats, DoorDash, SkipTheDishes), bakeries, coffee shops
-- Transport: Uber, Lyft, taxis, gas stations (including Costco Gas), parking (including parking tickets), public transit. NOT flights or hotels (those are Travel).
-- Travel: Flights, airlines (Porter, Air Canada, WestJet, Flair, PORTERAIR), hotels, vacation rentals, travel booking sites (Expedia, Booking.com, zenhotels.com, Airbnb), car rentals for trips
-- Bills & Utilities: Phone bills, internet, electricity, water, insurance, credit card fees (including "MEMBERSHIP FEE" or "ANNUAL FEE" or "INSTALLMENT"), cell phone plans (Rogers, Bell, Telus)
-- Entertainment: Netflix, Spotify, Disney+, gym memberships, movies, concerts, theatre, sports events, streaming services
-- Health: Pharmacies, doctors, dentists, hospitals, orthodontists, medical supplies for HUMANS ONLY. Do NOT categorize veterinary care, pet medications, or animal hospitals as Health - these go to Other.
-- Shopping: Amazon, retail stores, clothing stores, electronics, home goods, department stores, online shopping (NOT Costco Wholesale - that's Groceries)
-- Other: Professional services, veterinary/pet care, animal hospitals, unclear merchants, anything that doesn't clearly fit above categories
+CATEGORIZATION RULES - CHECK IN THIS ORDER:
 
-Special patterns:
-- "COSTCO WHOLESALE" or "COSTCO #" → Groceries (NOT Shopping)
-- "COSTCO GAS" or "COSTCO FUEL" → Transport
-- "PORTER" or "PORTERAIR" or "AIR CANADA" or "WESTJET" or "FLAIR" → Travel (NOT Transport)
-- "MEMBERSHIP FEE" or "ANNUAL FEE" or "INSTALLMENT" → Bills & Utilities (credit card fees)
-- Merchants with "DR", "DENTAL", "MEDICAL", "ORTHO" → Health (human health only)
-- "PARKING TICKET" → Transport
-- Veterinary, pet care, animal hospitals → Other (NOT Health)
+STEP 1: CHECK FOR GROCERIES (if merchant contains ANY of these keywords → Groceries):
+- "COSTCO WHOLESALE", "COSTCO W", "COSTCO #" (but NOT "COSTCO GAS")
+- "NO FRILLS", "NOFRILLS"
+- "FARM BOY", "FARMBOY"
+- "LOBLAWS", "LOBLAW"
+- "METRO", "METRO ONTARIO"
+- "SOBEYS", "SOBEY"
+- "FOOD BASICS", "FOODBASICS"
+- "FRESHCO", "FRESH CO"
+- "LONGOS", "LONGO"
+- "FORTINOS"
+- "WALMART GROCERY", "WALMART SUPERCENTRE"
+- "REAL CANADIAN SUPERSTORE", "SUPERSTORE"
+- "T&T SUPERMARKET", "TNT SUPERMARKET"
+- "WHOLE FOODS"
+- "INDEPENDENT GROCER", "YOUR INDEPENDENT"
+- "VALU-MART", "VALUMART"
+- "ZEHRS"
+- "SUPERMARKET", "GROCERY", "MARKET" (in name)
+
+STEP 2: CHECK FOR TRAVEL (if merchant contains ANY of these keywords → Travel):
+- "FLAIR", "FLAIR AIR", "FLAIR AIRLINES"
+- "PORTER", "PORTERAIR", "PORTER AIRLINES"
+- "AIR CANADA", "AIRCANADA"
+- "WESTJET"
+- "UNITED AIRLINES", "UNITED AIR"
+- "DELTA AIRLINES", "DELTA AIR"
+- "AMERICAN AIRLINES", "AA.COM"
+- "SOUTHWEST AIRLINES"
+- "ALLEGIANT", "SPIRIT AIRLINES", "FRONTIER"
+- "BRITISH AIRWAYS", "LUFTHANSA", "KLM"
+- "EXPEDIA", "BOOKING.COM", "HOTELS.COM", "AIRBNB"
+- "MARRIOTT", "HILTON", "HYATT", "HOLIDAY INN"
+- "ZENHOTELS", "TRIVAGO", "KAYAK"
+- Flight booking codes (numbers + letters like "6UBTM6", "DIR")
+
+STEP 3: CHECK FOR TRANSPORT (if merchant contains ANY of these keywords → Transport):
+- "UBER", "LYFT"
+- "TAXI", "CAB"
+- "PARKING TICKET", "PARKING METER", "GREEN P"
+- "TTC", "GO TRANSIT", "PRESTO"
+- "SHELL", "ESSO", "PETRO-CANADA", "CANADIAN TIRE GAS", "COSTCO GAS"
+- Gas stations (anything with "GAS", "FUEL", "PETROL")
+- "ZIPCAR", "CAR2GO", "ENTERPRISE RENT"
+
+STEP 4: CHECK FOR BILLS & UTILITIES (if merchant contains ANY of these keywords → Bills & Utilities):
+- "ROGERS", "BELL CANADA", "TELUS", "FIDO", "KOODO"
+- "ENBRIDGE", "TORONTO HYDRO", "HYDRO ONE"
+- "MEMBERSHIP FEE", "ANNUAL FEE", "INSTALLMENT"
+- "INSURANCE", "COOPERATORS", "DUUO"
+- Credit card fees with "FEE" in name
+
+STEP 5: CHECK FOR HEALTH (if merchant contains ANY of these keywords → Health):
+- "PHARMACY", "PHARMA", "SHOPPERS DRUG MART", "REXALL"
+- "ORTHODONTIC", "ORTHO", "DENTAL", "DENTIST"
+- "MEDICAL", "CLINIC", "HOSPITAL", "DR ", "DOCTOR"
+- "OPTOMETRY", "VISION CARE", "EYE CARE"
+- IMPORTANT: If "VET" or "VETERINARY" or "ANIMAL" → Other (NOT Health)
+
+STEP 6: CHECK FOR ENTERTAINMENT (if merchant contains ANY of these keywords → Entertainment):
+- "NETFLIX", "SPOTIFY", "DISNEY", "APPLE TV", "AMAZON PRIME VIDEO"
+- "MIRVISH", "CINEPLEX", "LANDMARK CINEMA"
+- "GOODLIFE", "LA FITNESS", "YMCA", "GYM"
+- "THEATRE", "THEATER", "CONCERT"
+
+STEP 7: CHECK FOR FOOD & DINING (restaurants, cafes, fast food):
+- "RESTAURANT", "BISTRO", "CAFE", "COFFEE", "BAR", "PUB"
+- "STARBUCKS", "TIM HORTONS", "SECOND CUP"
+- "MCDONALD", "BURGER KING", "WENDY", "KFC", "SUBWAY", "PIZZA"
+- "UBEREATS", "DOORDASH", "SKIP THE DISHES", "FOODORA"
+- "BIFF", "FOXLEY", "MONKEY BUSINESS" (Toronto restaurants)
+
+STEP 8: CHECK FOR SHOPPING (retail, Amazon, general stores):
+- "AMAZON.CA", "AMAZON.COM", "AMZN"
+- "BEST BUY", "STAPLES", "HOME DEPOT", "CANADIAN TIRE"
+- "H&M", "ZARA", "WINNERS", "MARSHALLS"
+- "TARGET", "WALMART" (not grocery)
+- General retail stores
+
+STEP 9: OTHER (everything else):
+- Professional services, veterinary care, pet services, unclear merchants
+- Anything that doesn't match above patterns
+
+IMPORTANT:
+- Always check keywords in ORDER from Step 1 to Step 9
+- First match wins
+- Case insensitive matching
+- "COSTCO WHOLESALE" is Groceries, "COSTCO GAS" is Transport
+- Airlines/flights are ALWAYS Travel, never Transport
+- Veterinary is ALWAYS Other, never Health
 
 Note: Do NOT mark is_subscription field - subscriptions are detected automatically by pattern analysis
 
@@ -1108,6 +1316,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             font-weight: 600;
             letter-spacing: 1.5px;
             text-transform: uppercase;
+            color: #ffffff !important;
             opacity: 0.9;
             margin-bottom: 12px;
         }}
@@ -1116,6 +1325,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             font-size: 48px;
             font-weight: 700;
             letter-spacing: -1px;
+            color: #ffffff !important;
             margin-bottom: 8px;
             word-wrap: break-word;
             overflow-wrap: break-word;
@@ -1123,6 +1333,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
         .header-subtitle {{
             font-size: 15px;
+            color: #ffffff !important;
             opacity: 0.85;
         }}
 
