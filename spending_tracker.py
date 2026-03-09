@@ -1046,104 +1046,479 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
     <meta name="supported-color-schemes" content="light dark">
     <title>Spending Report - {month_name}</title>
     <style>
-        :root {{ color-scheme: light dark; }}
+        /* Reset and base styles */
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0a0f;
-            color: #ffffff;
-            padding: 20px;
-            line-height: 1.6;
-            font-size: 14px;
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #f8f9fa;
+            color: #1a1d1f;
+            padding: 0;
+            margin: 0;
+            line-height: 1.5;
+            font-size: 15px;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }}
+
+        .email-wrapper {{
+            background: #f8f9fa;
+            padding: 40px 20px;
         }}
 
         .container {{
             max-width: 600px;
             margin: 0 auto;
-            background: #0a0a0f;
+            background: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 10px 15px rgba(0, 0, 0, 0.03);
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }}
 
-        .card {{
-            background: #ffffff;
-            border: none;
-            border-radius: 8px;
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px 32px;
+            text-align: center;
+            color: #ffffff;
+        }}
+
+        .header-title {{
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            opacity: 0.9;
+            margin-bottom: 12px;
+        }}
+
+        .header-amount {{
+            font-size: 48px;
+            font-weight: 700;
+            letter-spacing: -1px;
+            margin-bottom: 8px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }}
+
+        .header-subtitle {{
+            font-size: 15px;
+            opacity: 0.85;
+        }}
+
+        .content {{
+            padding: 32px;
+        }}
+
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 32px;
+        }}
+
+        .stat-card {{
+            background: #f8f9fa;
+            border-radius: 10px;
             padding: 20px;
-            margin-bottom: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            text-align: center;
+        }}
+
+        .stat-label {{
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }}
+
+        .stat-value {{
+            font-size: 24px;
+            font-weight: 700;
+            color: #1a1d1f;
         }}
 
         .section-header {{
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+            color: #6c757d;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e9ecef;
+        }}
+
+        .category-item {{
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 12px;
+            transition: all 0.2s ease;
+        }}
+
+        .category-item:hover {{
+            border-color: #dee2e6;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }}
+
+        .category-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }}
+
+        .category-name {{
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a1d1f;
+            display: flex;
+            align-items: center;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            max-width: 70%;
+        }}
+
+        .category-indicator {{
+            width: 4px;
+            height: 20px;
+            border-radius: 2px;
+            margin-right: 12px;
+        }}
+
+        .category-amount {{
+            font-size: 20px;
+            font-weight: 700;
+        }}
+
+        .category-meta {{
+            font-size: 13px;
+            color: #6c757d;
+        }}
+
+        .merchant-list {{
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 32px;
+        }}
+
+        .merchant-item {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #f8f9fa;
+            gap: 8px;
+            flex-wrap: wrap;
+        }}
+
+        .merchant-item:last-child {{
+            border-bottom: none;
+        }}
+
+        .merchant-rank {{
             font-size: 14px;
             font-weight: 700;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            color: #8b8b9a;
-            margin-bottom: 16px;
-            margin-top: 24px;
+            color: #adb5bd;
+            min-width: 32px;
         }}
 
-        @media (prefers-color-scheme: light) {{
-            body {{ background: #f0f0f5 !important; color: #1a1a1f !important; }}
-            .container {{ background: #f0f0f5 !important; }}
-            .card {{ background: #ffffff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important; }}
+        .merchant-name {{
+            flex: 1;
+            font-size: 15px;
+            font-weight: 500;
+            color: #1a1d1f;
+            margin: 0 16px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
 
+        .merchant-count {{
+            font-size: 13px;
+            color: #6c757d;
+            margin-right: 16px;
+        }}
+
+        .merchant-amount {{
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a1d1f;
+        }}
+
+        .subscription-card {{
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }}
+
+        .subscription-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #dee2e6;
+        }}
+
+        .subscription-title {{
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a1d1f;
+        }}
+
+        .subscription-total {{
+            font-size: 13px;
+            color: #6c757d;
+        }}
+
+        .subscription-item {{
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }}
+
+        .footer {{
+            background: #f8f9fa;
+            padding: 24px 32px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+        }}
+
+        .footer-text {{
+            font-size: 13px;
+            color: #6c757d;
+        }}
+
+        /* Dark mode support */
         @media (prefers-color-scheme: dark) {{
-            body {{ background: #0a0a0f !important; color: #ffffff !important; }}
-            .container {{ background: #0a0a0f !important; }}
-            .card {{ background: #1a1a1f !important; border: 1px solid #2a2a2f !important; }}
-            .section-header {{ color: #8b8b9a !important; }}
+            body {{
+                background: #0a0a0f !important;
+                color: #e9ecef !important;
+            }}
+
+            .email-wrapper {{
+                background: #0a0a0f !important;
+            }}
+
+            .container {{
+                background: #1a1a1f !important;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important;
+            }}
+
+            .header {{
+                background: linear-gradient(135deg, #4c5fd5 0%, #6147a3 100%) !important;
+            }}
+
+            .content {{
+                background: #1a1a1f !important;
+            }}
+
+            .stat-card {{
+                background: #2a2a2f !important;
+                color: #e9ecef !important;
+            }}
+
+            .stat-label {{
+                color: #9ca3af !important;
+            }}
+
+            .stat-value {{
+                color: #e9ecef !important;
+            }}
+
+            .section-header {{
+                color: #9ca3af !important;
+                border-bottom-color: #2a2a2f !important;
+            }}
+
+            .category-item {{
+                background: #2a2a2f !important;
+                border-color: #3a3a3f !important;
+            }}
+
+            .category-item:hover {{
+                border-color: #4a4a4f !important;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+            }}
+
+            .category-name {{
+                color: #e9ecef !important;
+            }}
+
+            .category-meta {{
+                color: #9ca3af !important;
+            }}
+
+            .merchant-list {{
+                background: #2a2a2f !important;
+                border-color: #3a3a3f !important;
+            }}
+
+            .merchant-item {{
+                border-bottom-color: #3a3a3f !important;
+            }}
+
+            .merchant-rank {{
+                color: #6c757d !important;
+            }}
+
+            .merchant-name {{
+                color: #e9ecef !important;
+            }}
+
+            .merchant-count {{
+                color: #9ca3af !important;
+            }}
+
+            .merchant-amount {{
+                color: #e9ecef !important;
+            }}
+
+            .subscription-card {{
+                background: #2a2a2f !important;
+                border-color: #3a3a3f !important;
+            }}
+
+            .subscription-header {{
+                border-bottom-color: #3a3a3f !important;
+            }}
+
+            .subscription-title {{
+                color: #e9ecef !important;
+            }}
+
+            .subscription-total {{
+                color: #9ca3af !important;
+            }}
+
+            .subscription-item {{
+                background: #3a3a3f !important;
+            }}
+
+            .footer {{
+                background: #2a2a2f !important;
+                border-top-color: #3a3a3f !important;
+            }}
+
+            .footer-text {{
+                color: #9ca3af !important;
+            }}
+
+            /* Keep colored amounts visible in dark mode */
+            .category-amount {{
+                opacity: 0.95 !important;
+            }}
+
+            /* MoM comparison backgrounds in dark mode */
+            div[style*="background: #fef2f2"] {{
+                background: rgba(220, 53, 69, 0.15) !important;
+            }}
+
+            div[style*="background: #f0fdf4"] {{
+                background: rgba(40, 167, 69, 0.15) !important;
+            }}
+        }}
+
+        /* Mobile responsive */
+        @media only screen and (max-width: 600px) {{
+            .email-wrapper {{ padding: 20px 12px; }}
+            .header {{ padding: 32px 24px; }}
+            .content {{ padding: 24px 20px; }}
+            .header-amount {{ font-size: 40px; }}
+            .stats-grid {{ grid-template-columns: 1fr; }}
         }}
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Header gradient banner -->
-        <div class="header-gradient" style="background: linear-gradient(135deg, #1a1a2e 0%, #13131a 100%); border-radius: 12px; padding: 32px 24px; text-align: center; margin-bottom: 20px; border-bottom: 3px solid #00d4aa;">
-            <div class="text-accent" style="font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #00d4aa; margin-bottom: 16px;">{month_name}</div>
-            <div class="text-primary" style="font-size: 52px; font-weight: 700; line-height: 1.1; color: #ffffff; margin-bottom: 12px;">${total_spent:,.2f}</div>
-            <div class="text-secondary" style="font-size: 14px; font-weight: 500; color: #8b8b9a;">Year to Date: ${ytd_total:,.2f}</div>
-        </div>"""
+    <div class="email-wrapper">
+        <div class="container">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-title">{month_name}</div>
+                <div class="header-amount">${total_spent:,.2f}</div>
+                <div class="header-subtitle">Total Spending</div>
+            </div>
 
-    # Alert banner - colored pill
-    if biggest_change_category and biggest_change_amount != 0:
-        arrow = "↑" if biggest_change_amount > 0 else "↓"
-        alert_bg = "rgba(239, 68, 68, 0.15)" if biggest_change_amount > 0 else "rgba(16, 185, 129, 0.15)"
-        alert_border = "#ef4444" if biggest_change_amount > 0 else "#10b981"
-        alert_text = "#ef4444" if biggest_change_amount > 0 else "#10b981"
-        alert_label = "LARGEST INCREASE" if biggest_change_amount > 0 else "LARGEST DECREASE"
+            <!-- Content -->
+            <div class="content">
+                <!-- Summary Stats -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Year to Date</div>
+                        <div class="stat-value">${ytd_total:,.2f}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Transactions</div>
+                        <div class="stat-value">{len(transactions)}</div>
+                    </div>
+                </div>"""
+
+    # Add MoM comparison if available
+    if mom_change is not None:
+        mom_color = "#dc3545" if mom_change > 0 else "#28a745"
+        mom_arrow = "↑" if mom_change > 0 else "↓"
+        mom_label = "more than" if mom_change > 0 else "less than"
 
         html += f"""
-        <div style="background: {alert_bg}; border: 2px solid {alert_border}; border-radius: 16px; padding: 16px 20px; text-align: center; margin-bottom: 20px;">
-            <div class="text-colored" style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {alert_text}; margin-bottom: 6px;">{alert_label}</div>
-            <div class="text-primary" style="font-size: 16px; font-weight: 600; color: #ffffff;">{biggest_change_category}: {arrow} ${abs(biggest_change_amount):,.2f} ({biggest_change_percent:+.1f}%)</div>
-        </div>"""
+                <!-- Month over Month -->
+                <div style="background: {'#fef2f2' if mom_change > 0 else '#f0fdf4'}; border-left: 4px solid {mom_color}; border-radius: 10px; padding: 20px; margin-bottom: 32px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 13px; font-weight: 600; color: #6c757d; margin-bottom: 4px;">vs Last Month</div>
+                            <div style="font-size: 16px; font-weight: 600; color: #1a1d1f;">
+                                {mom_arrow} ${abs(mom_change):,.2f} {mom_label} last month
+                            </div>
+                        </div>
+                        <div style="font-size: 24px; font-weight: 700; color: {mom_color};">
+                            {mom_percent:+.1f}%
+                        </div>
+                    </div>
+                </div>"""
 
     # Categories section
     html += """
-        <h2 class="section-header">Categories</h2>"""
+                <div class="section-header">SPENDING BY CATEGORY</div>"""
 
     for category, amount in sorted_categories:
         percentage = (amount / total_spent * 100) if total_spent > 0 else 0
         border_color = category_colors.get(category, '#95A5A6')
 
         html += f"""
-        <div class="card" style="border-left: 4px solid {border_color};">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="font-size: 16px; font-weight: 700; color: #1a1a1f;">{category}</div>
-                <div style="font-size: 18px; font-weight: 700; color: {border_color};">${amount:,.2f}</div>
-            </div>
-            <div style="font-size: 14px; color: #6b6b7a; margin-top: 4px;">{percentage:.1f}% of total spending</div>
-        </div>"""
+                <div class="category-item">
+                    <div class="category-header">
+                        <div class="category-name">
+                            <div class="category-indicator" style="background: {border_color};"></div>
+                            {category}
+                        </div>
+                        <div class="category-amount" style="color: {border_color};">${amount:,.2f}</div>
+                    </div>
+                    <div class="category-meta">{percentage:.1f}% of total spending</div>
+                </div>"""
 
     # Subscriptions section
     if subscriptions:
         html += f"""
-        <h2 class="section-header">💳 Recurring Subscriptions</h2>
-        <div class="card" style="border-left: 4px solid #00d4aa;">
-            <div style="font-size: 14px; color: #6b6b7a; margin-bottom: 16px;">Detected {len(subscriptions)} recurring subscriptions • ${subscription_total:,.2f}/month total</div>"""
+                <div class="section-header" style="margin-top: 40px;">RECURRING SUBSCRIPTIONS</div>
+                <div class="subscription-card">
+                    <div class="subscription-header">
+                        <div class="subscription-title">{len(subscriptions)} Active Subscriptions</div>
+                        <div class="subscription-total">${subscription_total:,.2f}/month</div>
+                    </div>"""
 
         for idx, sub in enumerate(subscriptions, 1):
             monthly_amt = sub['avg_amount']
@@ -1151,42 +1526,38 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             merchant = sub['merchant']
 
             html += f"""
-            <div style="padding: 12px 0; border-top: 1px solid #e0e0e8;">
-                <div style="display: flex; justify-content: space-between; align-items: start;">
-                    <div style="flex: 1;">
-                        <div style="font-size: 16px; font-weight: 600; color: #1a1a1f; margin-bottom: 4px;">{idx}. {merchant}</div>
-                        <div style="font-size: 13px; color: #6b6b7a;">{sub['occurrences']} charges detected</div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-size: 18px; font-weight: 700; color: #00d4aa;">${monthly_amt:,.2f}/mo</div>
-                        <div style="font-size: 13px; color: #6b6b7a;">${annual_amt:,.2f}/year</div>
-                    </div>
-                </div>
-            </div>"""
+                    <div class="subscription-item">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                            <div style="flex: 1;">
+                                <div style="font-size: 15px; font-weight: 600; color: #1a1d1f; margin-bottom: 4px;">{merchant}</div>
+                                <div style="font-size: 13px; color: #6c757d;">{sub['occurrences']} charges detected</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 18px; font-weight: 700; color: #1a1d1f;">${monthly_amt:,.2f}</div>
+                                <div style="font-size: 12px; color: #6c757d;">${annual_amt:,.2f}/year</div>
+                            </div>
+                        </div>
+                    </div>"""
 
         html += """
-        </div>"""
+                </div>"""
 
     # Top Merchants section
     html += """
-        <h2 class="section-header">Top Merchants</h2>
-        <div class="card">"""
+                <div class="section-header" style="margin-top: 40px;">TOP MERCHANTS</div>
+                <div class="merchant-list">"""
 
     for idx, (merchant, data) in enumerate(top_merchants, 1):
-        border_bottom = "" if idx == len(top_merchants) else "border-bottom: 1px solid #e0e0e8;"
-
         html += f"""
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; {border_bottom}">
-                <div style="flex: 1;">
-                    <span style="font-size: 14px; font-weight: 700; color: #8b8b9a; margin-right: 8px;">{idx}.</span>
-                    <span style="font-size: 16px; font-weight: 600; color: #1a1a1f;">{merchant}</span>
-                    <span style="font-size: 13px; color: #6b6b7a; margin-left: 8px;">({data['count']} transactions)</span>
-                </div>
-                <div style="font-size: 18px; font-weight: 700; color: #1a1a1f;">${data['amount']:,.2f}</div>
-            </div>"""
+                    <div class="merchant-item">
+                        <div class="merchant-rank">#{idx}</div>
+                        <div class="merchant-name">{merchant}</div>
+                        <div class="merchant-count">{data['count']} txns</div>
+                        <div class="merchant-amount">${data['amount']:,.2f}</div>
+                    </div>"""
 
     html += """
-        </div>"""
+                </div>"""
 
     # Month-over-month comparison
     if mom_change is not None:
@@ -1206,114 +1577,15 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             </div>
         </div>"""
 
-    # Data Quality section - dedicated dark card
-    if data_quality:
-        files_count = data_quality.get('files_processed', 0)
-        total_found = data_quality.get('total_found', 0)
-        total_skipped = data_quality.get('total_skipped', 0)
-        source_breakdown = data_quality.get('source_breakdown', {})
-
-        html += f"""
-        <div style="margin-top: 32px;">
-            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Data Quality</h2>
-            <div class="card">
-                <div style="display: flex; gap: 12px; margin-bottom: 20px;">
-                    <div class="stat-box" style="flex: 1; text-align: center; background: #1e1e2e; border-radius: 8px; padding: 16px;">
-                        <div class="text-secondary" style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 8px;">Files</div>
-                        <div class="text-accent" style="font-size: 24px; font-weight: 700; color: #00d4aa;">{files_count}</div>
-                    </div>
-                    <div class="stat-box" style="flex: 1; text-align: center; background: #1e1e2e; border-radius: 8px; padding: 16px;">
-                        <div class="text-secondary" style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 8px;">Transactions</div>
-                        <div class="text-accent" style="font-size: 24px; font-weight: 700; color: #00d4aa;">{total_found}</div>
-                    </div>
-                    <div class="stat-box" style="flex: 1; text-align: center; background: #1e1e2e; border-radius: 8px; padding: 16px;">
-                        <div class="text-secondary" style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 8px;">Skipped</div>
-                        <div class="text-colored" style="font-size: 24px; font-weight: 700; color: #ef4444;">{total_skipped}</div>
-                    </div>
+            <!-- Footer -->
+            <div class="footer">
+                <div class="footer-text">
+                    Generated on {datetime.now().strftime('%B %d, %Y')} • Powered by Claude AI
                 </div>
-                <div style="border-top: 1px solid #1e1e2e; padding-top: 16px;">
-                    <div class="text-secondary" style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 12px;">Sources</div>"""
-
-        # Show each source on its own line, hide sources with 0 transactions
-        for source, count in sorted(source_breakdown.items(), key=lambda x: x[1], reverse=True):
-            if count > 0:
-                friendly_name = get_friendly_source_name(source)
-                html += f"""
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1e1e2e;">
-                        <div class="text-primary" style="font-size: 16px; font-weight: 500; color: #ffffff;">{friendly_name}</div>
-                        <div class="text-accent" style="font-size: 16px; font-weight: 600; color: #00d4aa;">{count} txns</div>
-                    </div>"""
-
-        html += """
-                </div>
-            </div>
-        </div>"""
-
-    # Footer
-    html += f"""
-        <div style="text-align: center; padding: 24px 0; margin-top: 32px;">
-            <div class="text-secondary" style="font-size: 12px; font-weight: 500; color: #8b8b9a;">
-                {datetime.now().strftime('%B %d, %Y')}
             </div>
         </div>
+        </div>
     </div>
-
-    <style>
-        /* Light mode - class-based for maximum compatibility */
-        @media (prefers-color-scheme: light) {{
-            /* Backgrounds */
-            body {{
-                background-color: #f0f0f5 !important;
-            }}
-
-            .container {{
-                background-color: #f0f0f5 !important;
-            }}
-
-            .card {{
-                background-color: #ffffff !important;
-                border-color: #e0e0e8 !important;
-            }}
-
-            /* Header gradient */
-            .header-gradient {{
-                background: linear-gradient(135deg, #e8ecf1 0%, #f5f7fa 100%) !important;
-            }}
-
-            /* Text colors */
-            .text-primary {{
-                color: #1a1a1f !important;
-            }}
-
-            .text-secondary {{
-                color: #5a5a6a !important;
-            }}
-
-            .text-accent {{
-                color: #00a882 !important;
-            }}
-
-            .text-colored {{
-                /* Keep colored text visible - will inherit red/green from inline styles but slightly darker */
-                filter: brightness(0.85) !important;
-            }}
-
-            /* Badges and stat boxes */
-            .badge-count {{
-                background: #f5f5f7 !important;
-                color: #5a5a6a !important;
-            }}
-
-            .badge-colored {{
-                /* Keep background color but ensure text is visible */
-                color: #1a1a1f !important;
-            }}
-
-            .stat-box {{
-                background: #f5f5f7 !important;
-            }}
-        }}
-    </style>
 </body>
 </html>"""
 
@@ -1509,7 +1781,7 @@ def run_spending_analysis():
 
             html_report = generate_html_report(year, month, transactions, data_quality)
 
-            subject = f"Spending Report — {month_name}"
+            subject = f"💳 Spending Report — {month_name}"
             send_email(subject, html_report)
 
         logger.info("\n✓ All done!")
