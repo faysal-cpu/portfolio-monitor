@@ -1577,6 +1577,8 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             </div>
         </div>"""
 
+    # Footer
+    html += f"""
             <!-- Footer -->
             <div class="footer">
                 <div class="footer-text">
