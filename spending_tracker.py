@@ -2289,7 +2289,12 @@ def run_spending_analysis():
             html_report = generate_html_report(year, month, transactions, data_quality)
 
             subject = f"💳 Spending Report — {month_name}"
-            send_email(subject, html_report)
+
+            # Check for --skip-email flag
+            if '--skip-email' not in sys.argv:
+                send_email(subject, html_report)
+            else:
+                logger.info(f"✓ Email skipped for {month_name} (--skip-email flag)")
 
         logger.info("\n✓ All done!")
 
