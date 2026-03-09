@@ -1206,7 +1206,7 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
             # Costa Rica
             'ALAJUELA', 'BUDGET RENT A CAR',
             # Europe
-            'SOLIHULL', 'STOCKHOLM', 'NETLIFY',
+            'SOLIHULL', 'STOCKHOLM',
             # Netherlands
             'BERGHEM', 'SP ALCANSIDE',
             # Amazon Dubai
