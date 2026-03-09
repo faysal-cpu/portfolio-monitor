@@ -1143,9 +1143,21 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
         merchant_visits[clean_name]['amount'] += tx.amount
     top_by_visits = sorted(merchant_visits.items(), key=lambda x: x[1]['count'], reverse=True)[:5]
 
-    # Foreign transactions
-    foreign_keywords = ['USD', 'EUR', 'GBP', 'MXN', 'AED', 'IRELAND', 'MEXICO', 'UAE', 'USA', 'UK', 'DUBAI']
-    foreign_txs = [tx for tx in positive_txs if any(kw in (tx.description + ' ' + tx.merchant).upper() for kw in foreign_keywords)]
+    # Foreign transactions - check merchant, description, and raw country data
+    foreign_countries = ['USA', 'IRL', 'ARE', 'MEX', 'GBR', 'DEU', 'FRA', 'ESP', 'ITA', 'JPN', 'AUS']
+    foreign_keywords = ['USD', 'EUR', 'GBP', 'MXN', 'AED', 'IRELAND', 'MEXICO', 'UAE', 'UK', 'DUBAI', 'FLORIDA',
+                       'MIAMI', 'NAPLES', 'FORT LAUDERDA', 'WILTON MANORS']
+
+    def is_foreign(tx):
+        # Check merchant country code in raw data
+        country_code = tx.raw_data.get('Merchant Country Code', '').upper()
+        if country_code in foreign_countries:
+            return True
+        # Check keywords in merchant and description
+        text = (tx.description + ' ' + tx.merchant).upper()
+        return any(kw in text for kw in foreign_keywords)
+
+    foreign_txs = [tx for tx in positive_txs if is_foreign(tx)]
     foreign_total = sum(tx.amount for tx in foreign_txs)
 
     # Refund details
@@ -1225,14 +1237,17 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
         if len(txs_sorted) < 2:  # NEW: 2+ positive charges (not 3)
             continue
 
-        # NEW: Check for EXACT same amount (user requirement)
+        # Check for consistent amount (allow small variation for taxes/fees)
         amounts_rounded = [round(tx['amount'], 2) for tx in txs_sorted]
-        unique_amounts = set(amounts_rounded)
+        avg_amount = sum(amounts_rounded) / len(amounts_rounded)
 
-        if len(unique_amounts) != 1:  # Must be exact same amount every month
+        # Allow 10% variation to account for taxes, exchange rates, small plan changes
+        max_variation = avg_amount * 0.10
+        amount_range = max(amounts_rounded) - min(amounts_rounded)
+
+        # If variation is too large, skip (not a subscription)
+        if amount_range > max_variation:
             continue
-
-        exact_amount = amounts_rounded[0]
 
         # Check if intervals are 28-35 days (approximately monthly)
         intervals = []
@@ -1245,9 +1260,9 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
             subscriptions.append({
                 'merchant': txs_sorted[0]['merchant'],
                 'normalized': normalized_merchant,
-                'avg_amount': exact_amount,  # Use exact amount
+                'avg_amount': avg_amount,
                 'occurrences': len(txs_sorted),
-                'annual_cost': exact_amount * 12
+                'annual_cost': avg_amount * 12
             })
 
     # Sort by average amount descending
@@ -1764,11 +1779,15 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
     <div class="email-wrapper">
         <div class="container">
             <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 32px; text-align: center;">
-                <div class="header-title" style="font-size: 14px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #ffffff !important; opacity: 0.9; margin-bottom: 12px;">{month_name}</div>
-                <div class="header-amount" style="font-size: 48px; font-weight: 700; letter-spacing: -1px; color: #ffffff !important; margin-bottom: 8px;">${total_spent:,.2f}</div>
-                <div class="header-subtitle" style="font-size: 15px; color: #ffffff !important; opacity: 0.85;">Total Spending</div>
-            </div>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#667eea" style="background-color: #667eea !important;">
+                <tr>
+                    <td align="center" style="padding: 40px 32px; background-color: #667eea !important;">
+                        <div style="font-size: 14px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #ffffff !important; margin-bottom: 12px;">{month_name}</div>
+                        <div style="font-size: 48px; font-weight: 700; letter-spacing: -1px; color: #ffffff !important; line-height: 1.1; margin-bottom: 8px;">${total_spent:,.2f}</div>
+                        <div style="font-size: 15px; color: #ffffff !important;">Total Spending</div>
+                    </td>
+                </tr>
+            </table>
 
             <!-- Content -->
             <div class="content">
