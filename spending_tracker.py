@@ -2070,15 +2070,15 @@ def regenerate_month_email(year: int, month: int):
             for tx in month_data['transactions']
         ]
 
-        # Restore category assignments
-        for tx_obj, tx_data in zip(transactions, month_data['transactions']):
-            tx_obj.category = tx_data.get('category')
-            tx_obj.is_subscription = tx_data.get('is_subscription', False)
-
         month_name = datetime(year, month, 1).strftime('%B %Y')
         logger.info(f"Loaded {len(transactions)} transactions for {month_name}")
 
-        # Generate and send email
+        # RE-CATEGORIZE using current rules (keyword matching + Claude AI)
+        logger.info("Re-categorizing transactions with current rules...")
+        categorizer = ClaudeCategorizer(ANTHROPIC_API_KEY)
+        transactions = categorizer.categorize_transactions(transactions)
+
+        # Generate and send email with fresh categorizations
         html_report = generate_html_report(year, month, transactions)
         subject = f"💳 Spending Report — {month_name}"
         send_email(subject, html_report)
