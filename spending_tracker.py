@@ -113,7 +113,7 @@ class Transaction:
                  merchant: str, source: str, raw_data: Dict):
         self.date = date
         self.description = description
-        self.amount = abs(amount)
+        self.amount = amount  # Keep sign: positive = spending, negative = refund/cashback
         self.merchant = merchant
         self.source = source
         self.raw_data = raw_data
@@ -194,18 +194,22 @@ class CSVParser:
 
                 amount = CSVParser._parse_amount(amount_str)
 
-                # Negative = spending for Wealthsimple
-                if amount >= 0:
-                    continue
-
+                # Skip payments and transfers first
                 if CSVParser._is_payment_or_transfer(description):
                     skipped += 1
                     continue
 
+                # Skip positive amounts (income/deposits) - only track spending
+                # Negative = spending for Wealthsimple
+                if amount >= 0:
+                    skipped += 1
+                    continue
+
+                # Convert negative (spending) to positive for storage
                 transactions.append(Transaction(
                     date=date,
                     description=description,
-                    amount=abs(amount),
+                    amount=abs(amount),  # Convert negative to positive
                     merchant=CSVParser._clean_merchant_name(description),
                     source='Wealthsimple',
                     raw_data=row
@@ -220,7 +224,7 @@ class CSVParser:
     def parse_wealthsimple_cc(rows: List[Dict]) -> Tuple[List[Transaction], int]:
         """Parse Wealthsimple Credit Card CSV format
         Headers: transaction_date, post_date, type, details, amount, currency
-        Positive amount = spending (like Amex)
+        Positive = spending, Negative = refunds/cashback (kept as negative to reduce total)
         """
         transactions = []
         skipped = 0
@@ -241,18 +245,16 @@ class CSVParser:
 
                 amount = CSVParser._parse_amount(amount_str)
 
-                # Positive = spending for Wealthsimple Credit Card
-                if amount <= 0:
-                    continue
-
+                # Skip ONLY if it's a payment/transfer (not refunds/cashback)
                 if CSVParser._is_payment_or_transfer(description):
                     skipped += 1
                     continue
 
+                # Keep both positive (spending) and negative (refunds/cashback) amounts
                 transactions.append(Transaction(
                     date=date,
                     description=description,
-                    amount=abs(amount),
+                    amount=amount,  # Keep sign: positive = spending, negative = refund
                     merchant=CSVParser._clean_merchant_name(description),
                     source='Wealthsimple Credit Card',
                     raw_data=row
@@ -267,7 +269,7 @@ class CSVParser:
     def parse_amex(rows: List[Dict]) -> Tuple[List[Transaction], int]:
         """Parse American Express CSV format
         Headers: Date (format: 07 Aug 2025), Date Processed, Description, Amount
-        Positive amount = spending, negative = credits/refunds
+        Positive = spending, Negative = refunds/cashback (kept as negative to reduce total)
         """
         transactions = []
         skipped = 0
@@ -287,11 +289,6 @@ class CSVParser:
 
                 amount = CSVParser._parse_amount(amount_str)
 
-                # Skip negative amounts (refunds/credits)
-                if amount <= 0:
-                    skipped += 1
-                    continue
-
                 # Skip Amex payments
                 desc_upper = description.upper()
                 if 'PAYMENT RECEIVED' in desc_upper or 'PAYMENT THANK YOU' in desc_upper:
@@ -303,10 +300,11 @@ class CSVParser:
                     skipped += 1
                     continue
 
+                # Keep both positive (spending) and negative (refunds/cashback) amounts
                 transactions.append(Transaction(
                     date=date,
                     description=description,
-                    amount=abs(amount),
+                    amount=amount,  # Keep sign: positive = spending, negative = refund
                     merchant=CSVParser._clean_merchant_name(description),
                     source='American Express',
                     raw_data=row
@@ -321,6 +319,7 @@ class CSVParser:
     def parse_rogers(rows: List[Dict]) -> Tuple[List[Transaction], int]:
         """Parse Rogers Mastercard CSV format
         Many headers including: Date, Merchant Name, Amount (with $ sign)
+        Positive = spending, Negative = refunds/cashback (kept as negative to reduce total)
         """
         transactions = []
         skipped = 0
@@ -341,18 +340,16 @@ class CSVParser:
                 # Rogers amount has $ sign - strip it
                 amount = CSVParser._parse_amount(amount_str)
 
-                # Check if spending (should be positive after stripping $)
-                if amount <= 0:
-                    continue
-
+                # Skip ONLY if it's a payment/transfer (not refunds/cashback)
                 if CSVParser._is_payment_or_transfer(merchant):
                     skipped += 1
                     continue
 
+                # Keep both positive (spending) and negative (refunds/cashback) amounts
                 transactions.append(Transaction(
                     date=date,
                     description=merchant,
-                    amount=abs(amount),
+                    amount=amount,  # Keep sign: positive = spending, negative = refund
                     merchant=CSVParser._clean_merchant_name(merchant),
                     source='Rogers Mastercard',
                     raw_data=row
@@ -365,9 +362,11 @@ class CSVParser:
 
     @staticmethod
     def parse_td(rows: List[List[str]]) -> Tuple[List[Transaction], int]:
-        """Parse TD CSV format
-        NO HEADERS - data starts on row 1
-        Columns: Date, Description, Amount, Balance (in that order)
+        """Parse TD CSV format - handles malformed format with colons
+        Format: 02/10/2026:01/27/2026, Amazon.ae:ROYAL BANK OF CANADA, 18.14:nan, Unnamed: 3:139.0, 18.14.1:0.0
+        Actual transaction date is second part of first field (after colon)
+        Description is both parts of second field joined
+        Amount is in the "Unnamed: 3" field after splitting by colon
         Negative amount = spending
         """
         transactions = []
@@ -375,15 +374,38 @@ class CSVParser:
 
         for row in rows:
             try:
-                # TD has no headers, columns are: Date(0), Description(1), Amount(2), Balance(3)
-                if len(row) < 3:
+                if len(row) < 4:
                     continue
 
-                date_str = row[0]
-                description = row[1]
-                amount_str = row[2]
+                # Split each field by colon to extract values
+                # Field 0: "02/10/2026:01/27/2026" -> use second part "01/27/2026"
+                # Field 1: "Amazon.ae:ROYAL BANK OF CANADA" -> join both parts
+                # Field 3: "Unnamed: 3:139.0" -> use the value after "Unnamed: 3:"
+
+                # Extract date (second part of first field after splitting by :)
+                date_parts = row[0].split(':')
+                if len(date_parts) < 2:
+                    continue
+                date_str = date_parts[1]
+
+                # Extract description (join both parts of second field)
+                desc_parts = row[1].split(':')
+                if len(desc_parts) < 2:
+                    description = row[1]  # fallback to whole field
+                else:
+                    description = ' '.join(desc_parts)
+
+                # Extract amount from "Unnamed: 3:VALUE" field (row[3])
+                if 'Unnamed: 3' in row[3]:
+                    amount_str = row[3].split(':')[-1]  # get last part after splitting
+                else:
+                    amount_str = row[3]  # fallback
 
                 if not all([date_str, description, amount_str]):
+                    continue
+
+                # Skip if amount is 'nan'
+                if amount_str.strip().lower() == 'nan':
                     continue
 
                 date = CSVParser._parse_date(date_str)
@@ -394,6 +416,7 @@ class CSVParser:
 
                 # Negative = spending for TD
                 if amount >= 0:
+                    skipped += 1
                     continue
 
                 if CSVParser._is_payment_or_transfer(description):
@@ -409,7 +432,7 @@ class CSVParser:
                     raw_data={'date': date_str, 'description': description, 'amount': amount_str}
                 ))
             except Exception as e:
-                logger.error(f"Error parsing TD row: {e}")
+                logger.error(f"Error parsing TD row: {e} | Row: {row}")
                 continue
 
         return transactions, skipped
@@ -479,7 +502,19 @@ class CSVParser:
 
     @staticmethod
     def _clean_merchant_name(description: str) -> str:
-        """Extract clean merchant name"""
+        """Extract clean merchant name with special case mappings"""
+        # Special case mappings
+        desc_upper = description.upper()
+
+        # Rogers phone bill (Rogers ****1770 → Rogers Phone Bill)
+        if 'ROGERS' in desc_upper and '****' in description:
+            return 'Rogers Phone Bill'
+
+        # DUUO insurance (DUUO BY COOPERATORS → Rent Insurance)
+        if 'DUUO' in desc_upper and 'COOPERATORS' in desc_upper:
+            return 'Rent Insurance'
+
+        # General cleaning
         merchant = re.sub(r'\d{2}/\d{2}', '', description)
         merchant = re.sub(r'#\d+', '', merchant)
         merchant = re.sub(r'\s+', ' ', merchant).strip()
@@ -639,39 +674,44 @@ Transactions to categorize:
 IMPORTANT: Return ONLY a valid JSON object with this EXACT structure (no markdown, no other text):
 {{
   "categorized": [
-    {{"id": 0, "category": "Food & Dining", "is_subscription": false}},
+    {{"id": 0, "category": "Groceries", "is_subscription": false}},
     {{"id": 1, "category": "Transport", "is_subscription": false}}
   ]
 }}
 
 Rules:
-- Food & Dining: Restaurants, cafes, grocery stores, food delivery (UberEats, DoorDash, SkipTheDishes), bakeries, bars
-- Transport: Uber, Lyft, taxis, gas stations, parking (including parking tickets), public transit, car rental
-- Bills & Utilities: Phone bills, internet, electricity, water, insurance, credit card fees (including "MEMBERSHIP FEE" or "ANNUAL FEE"), cell phone plans
-- Entertainment: Netflix, Spotify, gym memberships, movies, concerts, theatre, sports events, streaming services
-- Health: Pharmacies, doctors, dentists, hospitals, orthodontists, medical supplies (HUMAN health only - NOT veterinary/pet care)
-- Shopping: Amazon, Costco, retail stores, clothing stores, electronics, home goods, department stores, online shopping
-- Other: Professional services, veterinary/pet care, unclear merchants, anything that doesn't clearly fit above categories
+- Groceries: Supermarkets and grocery stores where you buy ingredients to cook at home (No Frills, Loblaws, Costco Wholesale, Longos, Farm Boy, Metro, Sobeys, Food Basics, FreshCo, Walmart Grocery). ALL Costco Wholesale purchases go to Groceries (not Shopping).
+- Food & Dining: Restaurants, cafes, bars, fast food, food delivery services (UberEats, DoorDash, SkipTheDishes), bakeries, coffee shops
+- Transport: Uber, Lyft, taxis, gas stations (including Costco Gas), parking (including parking tickets), public transit. NOT flights or hotels (those are Travel).
+- Travel: Flights, airlines (Porter, Air Canada, WestJet, Flair, PORTERAIR), hotels, vacation rentals, travel booking sites (Expedia, Booking.com, zenhotels.com, Airbnb), car rentals for trips
+- Bills & Utilities: Phone bills, internet, electricity, water, insurance, credit card fees (including "MEMBERSHIP FEE" or "ANNUAL FEE" or "INSTALLMENT"), cell phone plans (Rogers, Bell, Telus)
+- Entertainment: Netflix, Spotify, Disney+, gym memberships, movies, concerts, theatre, sports events, streaming services
+- Health: Pharmacies, doctors, dentists, hospitals, orthodontists, medical supplies for HUMANS ONLY. Do NOT categorize veterinary care, pet medications, or animal hospitals as Health - these go to Other.
+- Shopping: Amazon, retail stores, clothing stores, electronics, home goods, department stores, online shopping (NOT Costco Wholesale - that's Groceries)
+- Other: Professional services, veterinary/pet care, animal hospitals, unclear merchants, anything that doesn't clearly fit above categories
 
 Special patterns:
-- "MEMBERSHIP FEE" or "ANNUAL FEE" → Bills & Utilities (credit card fees)
+- "COSTCO WHOLESALE" or "COSTCO #" → Groceries (NOT Shopping)
+- "COSTCO GAS" or "COSTCO FUEL" → Transport
+- "PORTER" or "PORTERAIR" or "AIR CANADA" or "WESTJET" or "FLAIR" → Travel (NOT Transport)
+- "MEMBERSHIP FEE" or "ANNUAL FEE" or "INSTALLMENT" → Bills & Utilities (credit card fees)
 - Merchants with "DR", "DENTAL", "MEDICAL", "ORTHO" → Health (human health only)
 - "PARKING TICKET" → Transport
 - Veterinary, pet care, animal hospitals → Other (NOT Health)
 
-Subscriptions: Only mark streaming, gym, phone/internet as is_subscription=true
+Subscriptions: Mark as is_subscription=true if monthly recurring: streaming services (Netflix, Spotify, Disney+), gym memberships (ClassPass, Club Pilates), phone/internet bills (Rogers, Bell, Telus), monthly insurance payments (DUUO BY COOPERATORS), any charge with "MONTHLY" or "INSTALLMENT" in the name, recurring software/services
 
 Return ONLY the JSON object:"""
         else:
             # Simpler prompt for retry
             prompt = f"""Categorize these transactions. Return ONLY valid JSON, no other text.
 
-Categories: Food & Dining, Transport, Bills & Utilities, Entertainment, Health, Shopping, Other
+Categories: Groceries, Food & Dining, Transport, Travel, Bills & Utilities, Entertainment, Health, Shopping, Other
 
 Transactions: {json.dumps(tx_list, indent=2)}
 
 Return this exact format:
-{{"categorized": [{{"id": 0, "category": "Food & Dining", "is_subscription": false}}]}}"""
+{{"categorized": [{{"id": 0, "category": "Groceries", "is_subscription": false}}]}}"""
 
         try:
             print("\n" + "="*80)
@@ -887,13 +927,106 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         if key.startswith(str(year))
     )
 
+    # Generate insights
+    insights = []
+
+    # Insight 1: Biggest spending increase
+    if biggest_change_category and biggest_change_amount > 50:
+        insights.append({
+            'icon': '📈',
+            'text': f"You spent ${abs(biggest_change_amount):,.0f} more on {biggest_change_category} this month ({biggest_change_percent:+.0f}%)",
+            'type': 'warning'
+        })
+
+    # Insight 2: Unusual merchant activity
+    if top_merchants:
+        top_merchant_name, top_merchant_data = top_merchants[0]
+        if top_merchant_data['count'] >= 10:
+            insights.append({
+                'icon': '🛍️',
+                'text': f"You visited {top_merchant_name} {top_merchant_data['count']} times this month",
+                'type': 'info'
+            })
+
+    # Insight 3: Subscription check
+    if len(subscriptions) >= 5:
+        insights.append({
+            'icon': '💳',
+            'text': f"{len(subscriptions)} active subscriptions totaling ${subscription_total:,.2f}/month",
+            'type': 'info'
+        })
+
+    # Insight 4: Spending pace (if more than halfway through month)
+    current_day = datetime.now().day
+    days_in_month = (datetime(year, month + 1, 1) - datetime(year, month, 1)).days if month < 12 else 31
+    if current_day > days_in_month / 2 and total_spent > 0:
+        projected = (total_spent / current_day) * days_in_month
+        if prev_month_data and projected > prev_month_data['total_spent'] * 1.15:
+            insights.append({
+                'icon': '⚡',
+                'text': f"On track to spend ${projected:,.0f} this month (15% above last month)",
+                'type': 'warning'
+            })
+
+    # Insight 5: Positive trend
+    if biggest_change_category and biggest_change_amount < -50:
+        insights.append({
+            'icon': '✅',
+            'text': f"Great job! {biggest_change_category} spending down ${abs(biggest_change_amount):,.0f} from last month",
+            'type': 'success'
+        })
+
+    # Get last 6 months for sparklines
+    sparkline_data = {}
+    for category in category_totals.keys():
+        amounts = []
+        for i in range(5, -1, -1):  # Last 6 months
+            month_offset = month - i
+            year_offset = year
+            while month_offset <= 0:
+                month_offset += 12
+                year_offset -= 1
+
+            key = f"{year_offset}-{month_offset:02d}"
+            if key in history:
+                amounts.append(history[key].get('category_totals', {}).get(category, 0))
+            else:
+                amounts.append(0)
+
+        sparkline_data[category] = amounts
+
+    def generate_sparkline(amounts: List[float]) -> str:
+        """Generate ASCII sparkline from amounts"""
+        if not amounts or all(a == 0 for a in amounts):
+            return '─' * len(amounts)
+
+        max_val = max(amounts) if max(amounts) > 0 else 1
+        min_val = min(amounts)
+
+        # Unicode block characters for sparkline
+        blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+
+        sparkline = ''
+        for amount in amounts:
+            if amount == 0:
+                sparkline += '▁'
+            else:
+                # Normalize to 0-7 range
+                normalized = int((amount / max_val) * 7) if max_val > 0 else 0
+                normalized = max(0, min(7, normalized))
+                sparkline += blocks[normalized]
+
+        return sparkline
+
     month_name = datetime(year, month, 1).strftime('%B %Y').upper()
     month_only = datetime(year, month, 1).strftime('%B').upper()
 
     # Category color mapping - premium palette
     category_colors = {
+        'Groceries': '#4CAF50',         # green
         'Food & Dining': '#FF6B35',     # coral
         'Transport': '#4A90E2',         # sky blue
+        'Travel': '#1ABC9C',            # turquoise
         'Health': '#50C878',            # emerald
         'Shopping': '#9B59B6',          # purple
         'Entertainment': '#FF69B4',     # hot pink
@@ -936,10 +1069,57 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             margin-bottom: 16px;
         }}
 
+        /* Progress bar styling */
+        .progress-bar {{
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            height: 8px;
+            overflow: hidden;
+            margin-top: 12px;
+        }}
+
+        .progress-fill {{
+            height: 100%;
+            border-radius: 8px;
+            transition: width 0.3s ease;
+        }}
+
+        /* Sparkline styling */
+        .sparkline {{
+            display: inline-block;
+            font-family: monospace;
+            font-size: 10px;
+            line-height: 1;
+            letter-spacing: -1px;
+        }}
+
+        /* Desktop responsive - wider layout */
+        @media only screen and (min-width: 768px) {{
+            .container {{
+                max-width: 900px;
+            }}
+
+            body {{
+                padding: 40px 20px;
+            }}
+
+            .card {{
+                padding: 24px;
+            }}
+
+            /* Two-column layout for categories on desktop */
+            .categories-grid {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+            }}
+        }}
+
         @media (prefers-color-scheme: light) {{
             body {{ background: #f0f0f5 !important; color: #1a1a1f !important; }}
             .container {{ background: #f0f0f5 !important; }}
             .card {{ background: #ffffff !important; border-color: #e0e0e8 !important; }}
+            .progress-bar {{ background: rgba(0,0,0,0.1) !important; }}
         }}
 
         @media only screen and (max-width: 600px) {{
@@ -971,10 +1151,35 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             <div class="text-primary" style="font-size: 16px; font-weight: 600; color: #ffffff;">{biggest_change_category}: {arrow} ${abs(biggest_change_amount):,.2f} ({biggest_change_percent:+.1f}%)</div>
         </div>"""
 
+    # Insights section
+    if insights:
+        html += """
+        <div style="margin-bottom: 20px;">
+            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">💡 Insights</h2>
+            <div class="card" style="background: linear-gradient(135deg, rgba(0, 212, 170, 0.08) 0%, rgba(0, 212, 170, 0.02) 100%); border-left: 4px solid #00d4aa;">"""
+
+        for insight in insights[:3]:  # Show max 3 insights
+            icon_color = {
+                'warning': '#F39C12',
+                'info': '#4A90E2',
+                'success': '#10b981'
+            }.get(insight['type'], '#8b8b9a')
+
+            html += f"""
+                <div style="display: flex; align-items: start; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <div style="font-size: 24px; margin-right: 12px;">{insight['icon']}</div>
+                    <div class="text-primary" style="flex: 1; font-size: 15px; line-height: 1.5; color: #ffffff;">{insight['text']}</div>
+                </div>"""
+
+        html += """
+            </div>
+        </div>"""
+
     # Categories section
     html += """
         <div style="margin-bottom: 20px;">
-            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Categories</h2>"""
+            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Categories</h2>
+        <div class="categories-grid">"""
 
     for category, amount in sorted_categories:
         percentage = (amount / total_spent * 100) if total_spent > 0 else 0
@@ -993,17 +1198,27 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             elif amount > 0:
                 mom_badge = '<div class="text-accent" style="font-size: 13px; font-weight: 600; color: #00d4aa; margin-top: 4px;">NEW</div>'
 
+        # Generate sparkline for this category
+        sparkline = generate_sparkline(sparkline_data.get(category, []))
+
         html += f"""
             <div class="card" style="border-left: 4px solid {border_color};">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <div class="text-primary" style="font-size: 16px; font-weight: 700; color: #ffffff;">{category}</div>
+                    <div>
+                        <div class="text-primary" style="font-size: 16px; font-weight: 700; color: #ffffff; margin-bottom: 4px;">{category}</div>
+                        <div class="text-secondary sparkline" style="font-size: 12px; color: {border_color};">{sparkline}</div>
+                    </div>
                     <div class="text-accent" style="font-size: 18px; font-weight: 700; color: #00d4aa;">${amount:,.2f}</div>
                 </div>
                 <div class="text-secondary" style="font-size: 14px; color: #8b8b9a;">{percentage:.1f}% of total</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {min(percentage, 100)}%; background: {border_color};"></div>
+                </div>
                 {mom_badge}
             </div>"""
 
     html += """
+        </div>
         </div>"""
 
     # Subscriptions section
