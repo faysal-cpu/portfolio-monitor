@@ -699,7 +699,7 @@ Special patterns:
 - "PARKING TICKET" → Transport
 - Veterinary, pet care, animal hospitals → Other (NOT Health)
 
-Subscriptions: Mark as is_subscription=true if monthly recurring: streaming services (Netflix, Spotify, Disney+), gym memberships (ClassPass, Club Pilates), phone/internet bills (Rogers, Bell, Telus), monthly insurance payments (DUUO BY COOPERATORS), any charge with "MONTHLY" or "INSTALLMENT" in the name, recurring software/services
+Note: Do NOT mark is_subscription field - subscriptions are detected automatically by pattern analysis
 
 Return ONLY the JSON object:"""
         else:
@@ -874,9 +874,102 @@ def get_friendly_source_name(source: str) -> str:
     return source_mapping.get(source, source)
 
 
+def normalize_merchant_name(merchant: str) -> str:
+    """Normalize merchant name for fuzzy matching"""
+    # Remove common patterns
+    normalized = re.sub(r'\*+\d+', '', merchant)  # Remove ****1770
+    normalized = re.sub(r'#\d+', '', normalized)   # Remove #123
+    normalized = re.sub(r'\d{2}/\d{2}', '', normalized)  # Remove dates
+    normalized = re.sub(r'\s+', ' ', normalized).strip().upper()
+    return normalized[:30]  # First 30 chars
+
+
+def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
+    """Detect subscriptions using pattern-based approach across historical data
+
+    Criteria:
+    - Merchant appears 3+ times in consecutive months
+    - Amounts within 20% variation
+    - Intervals of 28-35 days
+    - Credit card purchases only (not bank debits/payments)
+    """
+    history = DataStore.load_history()
+
+    # Collect all transactions from last 6 months
+    all_transactions = []
+    for i in range(6):
+        month_offset = month - i
+        year_offset = year
+        while month_offset <= 0:
+            month_offset += 12
+            year_offset -= 1
+
+        month_key = f"{year_offset}-{month_offset:02d}"
+        if month_key in history:
+            month_data = history[month_key]
+            # Reconstruct transactions from stored data
+            for merchant, amount in month_data.get('merchant_totals', {}).items():
+                all_transactions.append({
+                    'merchant': merchant,
+                    'amount': amount,
+                    'date': datetime(year_offset, month_offset, 15)  # Approximate mid-month
+                })
+
+    # Group by normalized merchant name
+    merchant_groups = defaultdict(list)
+    for tx in all_transactions:
+        normalized = normalize_merchant_name(tx['merchant'])
+        if normalized:
+            merchant_groups[normalized].append(tx)
+
+    # Detect subscription patterns
+    subscriptions = []
+
+    for normalized_merchant, txs in merchant_groups.items():
+        if len(txs) < 3:  # Must appear at least 3 times
+            continue
+
+        # Sort by date
+        txs_sorted = sorted(txs, key=lambda x: x['date'])
+
+        # Check if amounts are within 20% variation
+        amounts = [tx['amount'] for tx in txs_sorted]
+        avg_amount = sum(amounts) / len(amounts)
+
+        within_variation = all(
+            abs(amount - avg_amount) / avg_amount <= 0.20
+            for amount in amounts if avg_amount > 0
+        )
+
+        if not within_variation:
+            continue
+
+        # Check if intervals are 28-35 days (approximately monthly)
+        intervals = []
+        for i in range(1, len(txs_sorted)):
+            days_diff = (txs_sorted[i]['date'] - txs_sorted[i-1]['date']).days
+            intervals.append(days_diff)
+
+        # Check if most intervals are 28-35 days (allow some flexibility)
+        monthly_intervals = [28 <= interval <= 35 for interval in intervals]
+        if sum(monthly_intervals) >= len(intervals) * 0.66:  # 66% of intervals should be monthly
+            subscriptions.append({
+                'merchant': txs_sorted[0]['merchant'],  # Use original merchant name
+                'normalized': normalized_merchant,
+                'avg_amount': avg_amount,
+                'occurrences': len(txs_sorted),
+                'annual_cost': avg_amount * 12
+            })
+
+    # Sort by average amount descending
+    subscriptions.sort(key=lambda x: x['avg_amount'], reverse=True)
+
+    return subscriptions
+
+
 def generate_html_report(year: int, month: int, transactions: List[Transaction],
                          data_quality: Dict[str, Any] = None) -> str:
-    """Generate stunning dark/light mode responsive HTML report"""
+    """Generate clean single-column responsive HTML report"""
 
     total_spent = sum(tx.amount for tx in transactions)
 
@@ -893,8 +986,9 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
     top_merchants = sorted(merchant_totals.items(), key=lambda x: x[1]['amount'], reverse=True)[:10]
 
-    subscriptions = [tx for tx in transactions if tx.is_subscription]
-    subscription_total = sum(tx.amount for tx in subscriptions)
+    # Use pattern-based subscription detection
+    subscriptions = detect_pattern_subscriptions(year, month)
+    subscription_total = sum(sub['avg_amount'] for sub in subscriptions)
 
     prev_month_data = DataStore.get_previous_month_data(year, month)
     mom_change = None
@@ -926,97 +1020,6 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         for key, data in history.items()
         if key.startswith(str(year))
     )
-
-    # Generate insights
-    insights = []
-
-    # Insight 1: Biggest spending increase
-    if biggest_change_category and biggest_change_amount > 50:
-        insights.append({
-            'icon': '📈',
-            'text': f"You spent ${abs(biggest_change_amount):,.0f} more on {biggest_change_category} this month ({biggest_change_percent:+.0f}%)",
-            'type': 'warning'
-        })
-
-    # Insight 2: Unusual merchant activity
-    if top_merchants:
-        top_merchant_name, top_merchant_data = top_merchants[0]
-        if top_merchant_data['count'] >= 10:
-            insights.append({
-                'icon': '🛍️',
-                'text': f"You visited {top_merchant_name} {top_merchant_data['count']} times this month",
-                'type': 'info'
-            })
-
-    # Insight 3: Subscription check
-    if len(subscriptions) >= 5:
-        insights.append({
-            'icon': '💳',
-            'text': f"{len(subscriptions)} active subscriptions totaling ${subscription_total:,.2f}/month",
-            'type': 'info'
-        })
-
-    # Insight 4: Spending pace (if more than halfway through month)
-    current_day = datetime.now().day
-    days_in_month = (datetime(year, month + 1, 1) - datetime(year, month, 1)).days if month < 12 else 31
-    if current_day > days_in_month / 2 and total_spent > 0:
-        projected = (total_spent / current_day) * days_in_month
-        if prev_month_data and projected > prev_month_data['total_spent'] * 1.15:
-            insights.append({
-                'icon': '⚡',
-                'text': f"On track to spend ${projected:,.0f} this month (15% above last month)",
-                'type': 'warning'
-            })
-
-    # Insight 5: Positive trend
-    if biggest_change_category and biggest_change_amount < -50:
-        insights.append({
-            'icon': '✅',
-            'text': f"Great job! {biggest_change_category} spending down ${abs(biggest_change_amount):,.0f} from last month",
-            'type': 'success'
-        })
-
-    # Get last 6 months for sparklines
-    sparkline_data = {}
-    for category in category_totals.keys():
-        amounts = []
-        for i in range(5, -1, -1):  # Last 6 months
-            month_offset = month - i
-            year_offset = year
-            while month_offset <= 0:
-                month_offset += 12
-                year_offset -= 1
-
-            key = f"{year_offset}-{month_offset:02d}"
-            if key in history:
-                amounts.append(history[key].get('category_totals', {}).get(category, 0))
-            else:
-                amounts.append(0)
-
-        sparkline_data[category] = amounts
-
-    def generate_sparkline(amounts: List[float]) -> str:
-        """Generate ASCII sparkline from amounts"""
-        if not amounts or all(a == 0 for a in amounts):
-            return '─' * len(amounts)
-
-        max_val = max(amounts) if max(amounts) > 0 else 1
-        min_val = min(amounts)
-
-        # Unicode block characters for sparkline
-        blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
-
-        sparkline = ''
-        for amount in amounts:
-            if amount == 0:
-                sparkline += '▁'
-            else:
-                # Normalize to 0-7 range
-                normalized = int((amount / max_val) * 7) if max_val > 0 else 0
-                normalized = max(0, min(7, normalized))
-                sparkline += blocks[normalized]
-
-        return sparkline
 
     month_name = datetime(year, month, 1).strftime('%B %Y').upper()
     month_only = datetime(year, month, 1).strftime('%B').upper()
@@ -1052,6 +1055,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             color: #ffffff;
             padding: 20px;
             line-height: 1.6;
+            font-size: 14px;
             -webkit-font-smoothing: antialiased;
         }}
 
@@ -1062,69 +1066,35 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         }}
 
         .card {{
-            background: #13131a;
-            border: 1px solid #1e1e2e;
-            border-radius: 12px;
+            background: #ffffff;
+            border: none;
+            border-radius: 8px;
             padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        }}
+
+        .section-header {{
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #8b8b9a;
             margin-bottom: 16px;
-        }}
-
-        /* Progress bar styling */
-        .progress-bar {{
-            background: rgba(255,255,255,0.1);
-            border-radius: 8px;
-            height: 8px;
-            overflow: hidden;
-            margin-top: 12px;
-        }}
-
-        .progress-fill {{
-            height: 100%;
-            border-radius: 8px;
-            transition: width 0.3s ease;
-        }}
-
-        /* Sparkline styling */
-        .sparkline {{
-            display: inline-block;
-            font-family: monospace;
-            font-size: 10px;
-            line-height: 1;
-            letter-spacing: -1px;
-        }}
-
-        /* Desktop responsive - wider layout */
-        @media only screen and (min-width: 768px) {{
-            .container {{
-                max-width: 900px;
-            }}
-
-            body {{
-                padding: 40px 20px;
-            }}
-
-            .card {{
-                padding: 24px;
-            }}
-
-            /* Two-column layout for categories on desktop */
-            .categories-grid {{
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 16px;
-            }}
+            margin-top: 24px;
         }}
 
         @media (prefers-color-scheme: light) {{
             body {{ background: #f0f0f5 !important; color: #1a1a1f !important; }}
             .container {{ background: #f0f0f5 !important; }}
-            .card {{ background: #ffffff !important; border-color: #e0e0e8 !important; }}
-            .progress-bar {{ background: rgba(0,0,0,0.1) !important; }}
+            .card {{ background: #ffffff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important; }}
         }}
 
-        @media only screen and (max-width: 600px) {{
-            body {{ padding: 12px; }}
-            .card {{ padding: 16px; }}
+        @media (prefers-color-scheme: dark) {{
+            body {{ background: #0a0a0f !important; color: #ffffff !important; }}
+            .container {{ background: #0a0a0f !important; }}
+            .card {{ background: #1a1a1f !important; border: 1px solid #2a2a2f !important; }}
+            .section-header {{ color: #8b8b9a !important; }}
         }}
     </style>
 </head>
@@ -1151,111 +1121,68 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             <div class="text-primary" style="font-size: 16px; font-weight: 600; color: #ffffff;">{biggest_change_category}: {arrow} ${abs(biggest_change_amount):,.2f} ({biggest_change_percent:+.1f}%)</div>
         </div>"""
 
-    # Insights section
-    if insights:
-        html += """
-        <div style="margin-bottom: 20px;">
-            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">💡 Insights</h2>
-            <div class="card" style="background: linear-gradient(135deg, rgba(0, 212, 170, 0.08) 0%, rgba(0, 212, 170, 0.02) 100%); border-left: 4px solid #00d4aa;">"""
-
-        for insight in insights[:3]:  # Show max 3 insights
-            icon_color = {
-                'warning': '#F39C12',
-                'info': '#4A90E2',
-                'success': '#10b981'
-            }.get(insight['type'], '#8b8b9a')
-
-            html += f"""
-                <div style="display: flex; align-items: start; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
-                    <div style="font-size: 24px; margin-right: 12px;">{insight['icon']}</div>
-                    <div class="text-primary" style="flex: 1; font-size: 15px; line-height: 1.5; color: #ffffff;">{insight['text']}</div>
-                </div>"""
-
-        html += """
-            </div>
-        </div>"""
-
     # Categories section
     html += """
-        <div style="margin-bottom: 20px;">
-            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Categories</h2>
-        <div class="categories-grid">"""
+        <h2 class="section-header">Categories</h2>"""
 
     for category, amount in sorted_categories:
         percentage = (amount / total_spent * 100) if total_spent > 0 else 0
         border_color = category_colors.get(category, '#95A5A6')
 
-        mom_badge = ""
-        if prev_month_data:
-            prev_cat_amount = prev_month_data.get('category_totals', {}).get(category, 0)
-            if prev_cat_amount > 0:
-                cat_change = amount - prev_cat_amount
-                cat_change_percent = (cat_change / prev_cat_amount * 100)
-                arrow = "↑" if cat_change > 0 else "↓"
-                badge_bg = "rgba(239, 68, 68, 0.2)" if cat_change > 0 else "rgba(16, 185, 129, 0.2)"
-                badge_color = "#ef4444" if cat_change > 0 else "#10b981"
-                mom_badge = f'<div class="text-colored" style="font-size: 13px; font-weight: 600; color: {badge_color}; margin-top: 4px;">{arrow} {abs(cat_change_percent):.0f}% vs last month</div>'
-            elif amount > 0:
-                mom_badge = '<div class="text-accent" style="font-size: 13px; font-weight: 600; color: #00d4aa; margin-top: 4px;">NEW</div>'
-
-        # Generate sparkline for this category
-        sparkline = generate_sparkline(sparkline_data.get(category, []))
-
         html += f"""
-            <div class="card" style="border-left: 4px solid {border_color};">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <div>
-                        <div class="text-primary" style="font-size: 16px; font-weight: 700; color: #ffffff; margin-bottom: 4px;">{category}</div>
-                        <div class="text-secondary sparkline" style="font-size: 12px; color: {border_color};">{sparkline}</div>
-                    </div>
-                    <div class="text-accent" style="font-size: 18px; font-weight: 700; color: #00d4aa;">${amount:,.2f}</div>
-                </div>
-                <div class="text-secondary" style="font-size: 14px; color: #8b8b9a;">{percentage:.1f}% of total</div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {min(percentage, 100)}%; background: {border_color};"></div>
-                </div>
-                {mom_badge}
-            </div>"""
-
-    html += """
-        </div>
+        <div class="card" style="border-left: 4px solid {border_color};">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="font-size: 16px; font-weight: 700; color: #1a1a1f;">{category}</div>
+                <div style="font-size: 18px; font-weight: 700; color: {border_color};">${amount:,.2f}</div>
+            </div>
+            <div style="font-size: 14px; color: #6b6b7a; margin-top: 4px;">{percentage:.1f}% of total spending</div>
         </div>"""
 
     # Subscriptions section
     if subscriptions:
         html += f"""
-        <div style="margin-bottom: 20px;">
-            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Subscriptions</h2>
-            <div class="card" style="border-left: 4px solid #00d4aa;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1e1e2e;">
-                    <div class="text-accent" style="font-size: 16px; font-weight: 700; color: #00d4aa;">Monthly Recurring</div>
-                    <div class="text-primary" style="font-size: 20px; font-weight: 700; color: #ffffff;">${subscription_total:,.2f}/mo</div>
-                </div>"""
+        <h2 class="section-header">💳 Recurring Subscriptions</h2>
+        <div class="card" style="border-left: 4px solid #00d4aa;">
+            <div style="font-size: 14px; color: #6b6b7a; margin-bottom: 16px;">Detected {len(subscriptions)} recurring subscriptions • ${subscription_total:,.2f}/month total</div>"""
 
-        for sub in sorted(subscriptions, key=lambda x: x.amount, reverse=True):
+        for idx, sub in enumerate(subscriptions, 1):
+            monthly_amt = sub['avg_amount']
+            annual_amt = sub['annual_cost']
+            merchant = sub['merchant']
+
             html += f"""
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0;">
-                    <div class="text-primary" style="font-size: 16px; font-weight: 500; color: #ffffff;">{sub.merchant}</div>
-                    <div class="text-accent" style="font-size: 16px; font-weight: 600; color: #00d4aa;">${sub.amount:,.2f}</div>
-                </div>"""
+            <div style="padding: 12px 0; border-top: 1px solid #e0e0e8;">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div style="flex: 1;">
+                        <div style="font-size: 16px; font-weight: 600; color: #1a1a1f; margin-bottom: 4px;">{idx}. {merchant}</div>
+                        <div style="font-size: 13px; color: #6b6b7a;">{sub['occurrences']} charges detected</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 18px; font-weight: 700; color: #00d4aa;">${monthly_amt:,.2f}/mo</div>
+                        <div style="font-size: 13px; color: #6b6b7a;">${annual_amt:,.2f}/year</div>
+                    </div>
+                </div>
+            </div>"""
 
         html += """
-            </div>
         </div>"""
 
     # Top Merchants section
     html += """
-        <div style="margin-bottom: 20px;">
-            <h2 class="text-secondary" style="font-size: 14px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 16px; padding: 0 4px;">Top Merchants</h2>"""
+        <h2 class="section-header">Top Merchants</h2>
+        <div class="card">"""
 
-    for merchant, data in top_merchants:
+    for idx, (merchant, data) in enumerate(top_merchants, 1):
+        border_bottom = "" if idx == len(top_merchants) else "border-bottom: 1px solid #e0e0e8;"
+
         html += f"""
-            <div class="card">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div class="text-primary" style="font-size: 16px; font-weight: 700; color: #ffffff; flex: 1;">{merchant}</div>
-                    <div class="badge-count" style="display: inline-block; background: #1e1e2e; color: #8b8b9a; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; margin: 0 12px;">{data['count']}×</div>
-                    <div class="text-accent" style="font-size: 18px; font-weight: 700; color: #00d4aa; white-space: nowrap;">${data['amount']:,.2f}</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; {border_bottom}">
+                <div style="flex: 1;">
+                    <span style="font-size: 14px; font-weight: 700; color: #8b8b9a; margin-right: 8px;">{idx}.</span>
+                    <span style="font-size: 16px; font-weight: 600; color: #1a1a1f;">{merchant}</span>
+                    <span style="font-size: 13px; color: #6b6b7a; margin-left: 8px;">({data['count']} transactions)</span>
                 </div>
+                <div style="font-size: 18px; font-weight: 700; color: #1a1a1f;">${data['amount']:,.2f}</div>
             </div>"""
 
     html += """
