@@ -1092,6 +1092,75 @@ def normalize_merchant_name(merchant: str) -> str:
     return normalized[:30]  # First 30 chars
 
 
+def clean_merchant_for_display(merchant: str) -> str:
+    """Clean merchant name for display - remove location codes, numbers, extra info"""
+    clean = re.sub(r'#\d+', '', merchant)  # Remove #43, #524
+    clean = re.sub(r'W\d+', '', clean)  # Remove W524, W1316
+    clean = re.sub(r'\*+\d+', '', clean)  # Remove ****1770
+    clean = re.sub(r'\d{2}/\d{2}', '', clean)  # Remove dates
+    clean = re.sub(r'\s+[A-Z]{2}$', '', clean)  # Remove trailing state codes
+    clean = re.sub(r'\s{2,}', ' ', clean).strip()  # Clean multiple spaces
+    return clean[:50]
+
+
+def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, Any]:
+    """Calculate spending velocity, patterns, and insights"""
+    if not transactions:
+        return {
+            'avg_per_day': 0, 'highest_day': (None, 0), 'weekend_pct': 0,
+            'top_by_visits': [], 'foreign_total': 0, 'foreign_count': 0,
+            'total_refunds': 0, 'refund_details': []
+        }
+
+    positive_txs = [tx for tx in transactions if tx.amount > 0]
+    negative_txs = [tx for tx in transactions if tx.amount < 0]
+    total_spending = sum(tx.amount for tx in positive_txs)
+    total_refunds = abs(sum(tx.amount for tx in negative_txs))
+
+    # Daily average
+    dates = [tx.date for tx in transactions]
+    if dates:
+        days_in_month = (max(dates) - min(dates)).days + 1
+        avg_per_day = total_spending / days_in_month if days_in_month > 0 else 0
+    else:
+        avg_per_day = 0
+
+    # Highest spending day
+    daily_spending = defaultdict(float)
+    for tx in positive_txs:
+        daily_spending[tx.date.date()] += tx.amount
+    highest_day = max(daily_spending.items(), key=lambda x: x[1]) if daily_spending else (None, 0)
+
+    # Weekend vs weekday
+    weekend_spending = sum(tx.amount for tx in positive_txs if tx.date.weekday() >= 5)
+    weekend_pct = (weekend_spending / total_spending * 100) if total_spending > 0 else 0
+
+    # Most frequent merchants
+    merchant_visits = defaultdict(lambda: {'count': 0, 'amount': 0.0})
+    for tx in positive_txs:
+        clean_name = clean_merchant_for_display(tx.merchant)
+        merchant_visits[clean_name]['count'] += 1
+        merchant_visits[clean_name]['amount'] += tx.amount
+    top_by_visits = sorted(merchant_visits.items(), key=lambda x: x[1]['count'], reverse=True)[:5]
+
+    # Foreign transactions
+    foreign_keywords = ['USD', 'EUR', 'GBP', 'MXN', 'AED', 'IRELAND', 'MEXICO', 'UAE', 'USA', 'UK', 'DUBAI']
+    foreign_txs = [tx for tx in positive_txs if any(kw in (tx.description + ' ' + tx.merchant).upper() for kw in foreign_keywords)]
+    foreign_total = sum(tx.amount for tx in foreign_txs)
+
+    # Refund details
+    refund_details = [
+        {'merchant': clean_merchant_for_display(tx.merchant), 'amount': abs(tx.amount)}
+        for tx in sorted(negative_txs, key=lambda x: x.amount)[:5]
+    ]
+
+    return {
+        'avg_per_day': avg_per_day, 'highest_day': highest_day, 'weekend_pct': weekend_pct,
+        'top_by_visits': top_by_visits, 'foreign_total': foreign_total, 'foreign_count': len(foreign_txs),
+        'total_refunds': total_refunds, 'refund_details': refund_details
+    }
+
+
 def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
     """Detect subscriptions using pattern-based approach across historical data
 
@@ -1134,34 +1203,36 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
     subscriptions = []
 
     for normalized_merchant, txs in merchant_groups.items():
-        if len(txs) < 3:  # Must appear at least 3 times
+        # NEW: 2+ months minimum (changed from 3)
+        if len(txs) < 2:
             continue
 
-        # Skip cashback, refunds, and other non-subscription patterns
-        skip_keywords = ['cashback', 'remises', 'refund', 'credit', 'return', 'reimbursement']
+        # Skip payment/cashback/refunds (ENHANCED filtering)
+        skip_keywords = [
+            'cashback', 'remises', 'rebate', 'refund', 'credit', 'return',
+            'reimbursement', 'payment thank you', 'payment received',
+            'pymt', 'pmt', 'amex cards', 'rogrs bnk mc'
+        ]
         if any(keyword in normalized_merchant.lower() for keyword in skip_keywords):
             continue
 
         # Sort by date
         txs_sorted = sorted(txs, key=lambda x: x['date'])
 
-        # FILTER OUT NEGATIVE AMOUNTS (refunds/cashback) - these are NOT subscriptions
+        # FILTER OUT NEGATIVE AMOUNTS (refunds/cashback)
         txs_sorted = [tx for tx in txs_sorted if tx['amount'] > 0]
 
-        if len(txs_sorted) < 3:  # Need at least 3 positive charges
+        if len(txs_sorted) < 2:  # NEW: 2+ positive charges (not 3)
             continue
 
-        # Check if amounts are within 20% variation
-        amounts = [tx['amount'] for tx in txs_sorted]
-        avg_amount = sum(amounts) / len(amounts)
+        # NEW: Check for EXACT same amount (user requirement)
+        amounts_rounded = [round(tx['amount'], 2) for tx in txs_sorted]
+        unique_amounts = set(amounts_rounded)
 
-        within_variation = all(
-            abs(amount - avg_amount) / avg_amount <= 0.20
-            for amount in amounts if avg_amount > 0
-        )
-
-        if not within_variation:
+        if len(unique_amounts) != 1:  # Must be exact same amount every month
             continue
+
+        exact_amount = amounts_rounded[0]
 
         # Check if intervals are 28-35 days (approximately monthly)
         intervals = []
@@ -1169,15 +1240,14 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
             days_diff = (txs_sorted[i]['date'] - txs_sorted[i-1]['date']).days
             intervals.append(days_diff)
 
-        # Check if most intervals are 28-35 days (allow some flexibility)
-        monthly_intervals = [28 <= interval <= 35 for interval in intervals]
-        if sum(monthly_intervals) >= len(intervals) * 0.66:  # 66% of intervals should be monthly
+        # Check if intervals are monthly (28-35 days)
+        if intervals and all(28 <= interval <= 35 for interval in intervals):
             subscriptions.append({
-                'merchant': txs_sorted[0]['merchant'],  # Use original merchant name
+                'merchant': txs_sorted[0]['merchant'],
                 'normalized': normalized_merchant,
-                'avg_amount': avg_amount,
+                'avg_amount': exact_amount,  # Use exact amount
                 'occurrences': len(txs_sorted),
-                'annual_cost': avg_amount * 12
+                'annual_cost': exact_amount * 12
             })
 
     # Sort by average amount descending
@@ -1200,12 +1270,13 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
     sorted_categories = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
 
-    # Merchant totals: only include positive amounts
+    # Merchant totals: only include positive amounts, use cleaned names
     merchant_totals = defaultdict(lambda: {'amount': 0.0, 'count': 0})
     for tx in transactions:
         if tx.amount > 0:  # Only count spending, not refunds
-            merchant_totals[tx.merchant]['amount'] += tx.amount
-            merchant_totals[tx.merchant]['count'] += 1
+            clean_name = clean_merchant_for_display(tx.merchant)
+            merchant_totals[clean_name]['amount'] += tx.amount
+            merchant_totals[clean_name]['count'] += 1
 
     top_merchants = sorted(merchant_totals.items(), key=lambda x: x[1]['amount'], reverse=True)[:10]
 
@@ -1213,6 +1284,9 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
     subscriptions = detect_pattern_subscriptions(year, month)
     # Only sum positive subscription amounts
     subscription_total = sum(sub['avg_amount'] for sub in subscriptions if sub['avg_amount'] > 0)
+
+    # Calculate spending insights (velocity, patterns, refunds, foreign)
+    insights = calculate_spending_insights(transactions)
 
     prev_month_data = DataStore.get_previous_month_data(year, month)
     mom_change = None
@@ -1690,10 +1764,10 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
     <div class="email-wrapper">
         <div class="container">
             <!-- Header -->
-            <div class="header">
-                <div class="header-title">{month_name}</div>
-                <div class="header-amount">${total_spent:,.2f}</div>
-                <div class="header-subtitle">Total Spending</div>
+            <div class="header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 32px; text-align: center;">
+                <div class="header-title" style="font-size: 14px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #ffffff !important; opacity: 0.9; margin-bottom: 12px;">{month_name}</div>
+                <div class="header-amount" style="font-size: 48px; font-weight: 700; letter-spacing: -1px; color: #ffffff !important; margin-bottom: 8px;">${total_spent:,.2f}</div>
+                <div class="header-subtitle" style="font-size: 15px; color: #ffffff !important; opacity: 0.85;">Total Spending</div>
             </div>
 
             <!-- Content -->
@@ -1765,7 +1839,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         for idx, sub in enumerate(subscriptions, 1):
             monthly_amt = sub['avg_amount']
             annual_amt = sub['annual_cost']
-            merchant = sub['merchant']
+            merchant = clean_merchant_for_display(sub['merchant'])
 
             html += f"""
                     <div class="subscription-item">
@@ -1784,9 +1858,94 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         html += """
                 </div>"""
 
-    # Top Merchants section
+    # Returns & Refunds section
+    if insights['total_refunds'] > 0:
+        html += f"""
+                <div class="section-header" style="margin-top: 40px;">RETURNS & REFUNDS</div>
+                <div class="card" style="background: rgba(16, 185, 129, 0.08); border-color: #10b981;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div style="font-size: 15px; font-weight: 600; color: #1a1d1f;">Total Refunded</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #10b981;">${insights['total_refunds']:,.2f}</div>
+                    </div>"""
+
+        if insights['refund_details']:
+            html += """
+                    <div style="border-top: 1px solid rgba(16, 185, 129, 0.2); padding-top: 16px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 12px;">Top Refunds</div>"""
+
+            for refund in insights['refund_details']:
+                html += f"""
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(16, 185, 129, 0.1);">
+                            <div style="font-size: 14px; color: #1a1d1f;">{refund['merchant']}</div>
+                            <div style="font-size: 14px; font-weight: 600; color: #10b981;">${refund['amount']:,.2f}</div>
+                        </div>"""
+
+            html += """
+                    </div>"""
+
+        html += """
+                </div>"""
+
+    # Foreign Spending section
+    if insights['foreign_count'] > 0:
+        html += f"""
+                <div class="section-header" style="margin-top: 40px;">FOREIGN SPENDING</div>
+                <div class="card" style="background: rgba(99, 102, 241, 0.08); border-color: #6366f1;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="font-size: 15px; font-weight: 600; color: #1a1d1f;">International Transactions</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #6366f1;">${insights['foreign_total']:,.2f}</div>
+                    </div>
+                    <div style="font-size: 13px; color: #495057;">{insights['foreign_count']} foreign transactions detected</div>
+                </div>"""
+
+    # Spending Velocity section
+    html += f"""
+                <div class="section-header" style="margin-top: 40px;">SPENDING PATTERNS</div>
+                <div class="card">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 24px;">
+                        <div>
+                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 8px;">Average Per Day</div>
+                            <div style="font-size: 28px; font-weight: 700; color: #1a1d1f;">${insights['avg_per_day']:,.2f}</div>
+                        </div>"""
+
+    if insights['highest_day'][0]:
+        html += f"""
+                        <div>
+                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 8px;">Highest Day</div>
+                            <div style="font-size: 28px; font-weight: 700; color: #ef4444;">${insights['highest_day'][1]:,.2f}</div>
+                            <div style="font-size: 12px; color: #495057; margin-top: 4px;">{insights['highest_day'][0].strftime('%b %d')}</div>
+                        </div>"""
+
+    html += f"""
+                        <div>
+                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 8px;">Weekend Spending</div>
+                            <div style="font-size: 28px; font-weight: 700; color: #667eea;">{insights['weekend_pct']:.1f}%</div>
+                            <div style="font-size: 12px; color: #495057; margin-top: 4px;">of total</div>
+                        </div>
+                    </div>
+                </div>"""
+
+    # Most Frequent Merchants section
+    if insights['top_by_visits']:
+        html += """
+                <div class="section-header" style="margin-top: 40px;">MOST VISITED MERCHANTS</div>
+                <div class="merchant-list">"""
+
+        for idx, (merchant, data) in enumerate(insights['top_by_visits'], 1):
+            html += f"""
+                    <div class="merchant-item">
+                        <div class="merchant-rank">#{idx}</div>
+                        <div class="merchant-name">{merchant}</div>
+                        <div class="merchant-count">{data['count']} visits</div>
+                        <div class="merchant-amount">${data['amount']:,.2f}</div>
+                    </div>"""
+
+        html += """
+                </div>"""
+
+    # Top Merchants by Amount section
     html += """
-                <div class="section-header" style="margin-top: 40px;">TOP MERCHANTS</div>
+                <div class="section-header" style="margin-top: 40px;">TOP MERCHANTS BY AMOUNT</div>
                 <div class="merchant-list">"""
 
     for idx, (merchant, data) in enumerate(top_merchants, 1):
@@ -1816,7 +1975,22 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             </div>
             <div class="badge-colored" style="display: inline-block; background: {mom_color}; color: #ffffff; padding: 6px 14px; border-radius: 16px; font-size: 14px; font-weight: 600; margin-top: 8px;">
                 {mom_percent:+.1f}% · {mom_label}
-            </div>
+            </div>"""
+
+        # Add category breakdown if available
+        if biggest_change_category:
+            change_arrow = "↑" if biggest_change_amount > 0 else "↓"
+            change_color = "#ef4444" if biggest_change_amount > 0 else "#10b981"
+            html += f"""
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(0, 0, 0, 0.1);">
+                <div style="font-size: 13px; color: #495057; margin-bottom: 8px;">Biggest Change</div>
+                <div style="font-size: 16px; font-weight: 600; color: #1a1d1f; margin-bottom: 4px;">{biggest_change_category}</div>
+                <div style="font-size: 18px; font-weight: 700; color: {change_color};">
+                    {change_arrow} ${abs(biggest_change_amount):,.2f} <span style="font-size: 14px; font-weight: 600;">({biggest_change_percent:+.1f}%)</span>
+                </div>
+            </div>"""
+
+        html += """
         </div>"""
 
     # Footer
