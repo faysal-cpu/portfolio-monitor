@@ -984,22 +984,27 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
     total_spent = sum(tx.amount for tx in transactions)
 
+    # Category totals: only include positive amounts (spending), exclude refunds/cashback
     category_totals = defaultdict(float)
     for tx in transactions:
-        category_totals[tx.category or 'Other'] += tx.amount
+        if tx.amount > 0:  # Only count spending, not refunds
+            category_totals[tx.category or 'Other'] += tx.amount
 
     sorted_categories = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
 
+    # Merchant totals: only include positive amounts
     merchant_totals = defaultdict(lambda: {'amount': 0.0, 'count': 0})
     for tx in transactions:
-        merchant_totals[tx.merchant]['amount'] += tx.amount
-        merchant_totals[tx.merchant]['count'] += 1
+        if tx.amount > 0:  # Only count spending, not refunds
+            merchant_totals[tx.merchant]['amount'] += tx.amount
+            merchant_totals[tx.merchant]['count'] += 1
 
     top_merchants = sorted(merchant_totals.items(), key=lambda x: x[1]['amount'], reverse=True)[:10]
 
     # Use pattern-based subscription detection
     subscriptions = detect_pattern_subscriptions(year, month)
-    subscription_total = sum(sub['avg_amount'] for sub in subscriptions)
+    # Only sum positive subscription amounts
+    subscription_total = sum(sub['avg_amount'] for sub in subscriptions if sub['avg_amount'] > 0)
 
     prev_month_data = DataStore.get_previous_month_data(year, month)
     mom_change = None
@@ -1025,11 +1030,12 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                 biggest_change_amount = change
                 biggest_change_percent = change_percent
 
+    # Calculate YTD: sum only months from January up to current month
     history = DataStore.load_history()
     ytd_total = sum(
         data['total_spent']
         for key, data in history.items()
-        if key.startswith(str(year))
+        if key.startswith(str(year)) and int(key.split('-')[1]) <= month
     )
 
     month_name = datetime(year, month, 1).strftime('%B %Y').upper()
@@ -1143,7 +1149,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            color: #6c757d;
+            color: #495057;
             margin-bottom: 8px;
         }}
 
@@ -1158,7 +1164,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             font-weight: 700;
             letter-spacing: 1.2px;
             text-transform: uppercase;
-            color: #6c757d;
+            color: #495057;
             margin-bottom: 20px;
             padding-bottom: 12px;
             border-bottom: 2px solid #e9ecef;
@@ -1212,7 +1218,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
         .category-meta {{
             font-size: 13px;
-            color: #6c757d;
+            color: #495057;
         }}
 
         .merchant-list {{
@@ -1258,7 +1264,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
         .merchant-count {{
             font-size: 13px;
-            color: #6c757d;
+            color: #495057;
             margin-right: 16px;
         }}
 
@@ -1293,7 +1299,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
         .subscription-total {{
             font-size: 13px;
-            color: #6c757d;
+            color: #495057;
         }}
 
         .subscription-item {{
@@ -1312,7 +1318,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
         .footer-text {{
             font-size: 13px;
-            color: #6c757d;
+            color: #495057;
         }}
 
         /* Dark mode support */
@@ -1504,7 +1510,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                 <div style="background: {'#fef2f2' if mom_change > 0 else '#f0fdf4'}; border-left: 4px solid {mom_color}; border-radius: 10px; padding: 20px; margin-bottom: 32px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <div style="font-size: 13px; font-weight: 600; color: #6c757d; margin-bottom: 4px;">vs Last Month</div>
+                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 4px;">vs Last Month</div>
                             <div style="font-size: 16px; font-weight: 600; color: #1a1d1f;">
                                 {mom_arrow} ${abs(mom_change):,.2f} {mom_label} last month
                             </div>
@@ -1555,11 +1561,11 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
                             <div style="flex: 1;">
                                 <div style="font-size: 15px; font-weight: 600; color: #1a1d1f; margin-bottom: 4px;">{merchant}</div>
-                                <div style="font-size: 13px; color: #6c757d;">{sub['occurrences']} charges detected</div>
+                                <div style="font-size: 13px; color: #495057;">{sub['occurrences']} charges detected</div>
                             </div>
                             <div style="text-align: right;">
                                 <div style="font-size: 18px; font-weight: 700; color: #1a1d1f;">${monthly_amt:,.2f}</div>
-                                <div style="font-size: 12px; color: #6c757d;">${annual_amt:,.2f}/year</div>
+                                <div style="font-size: 12px; color: #495057;">${annual_amt:,.2f}/year</div>
                             </div>
                         </div>
                     </div>"""
@@ -1593,7 +1599,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
         html += f"""
         <div class="card" style="background: {mom_bg}; border-color: {mom_color}; text-align: center; padding: 28px 20px;">
-            <div class="text-secondary" style="font-size: 13px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #8b8b9a; margin-bottom: 12px;">Month over Month</div>
+            <div class="text-secondary" style="font-size: 13px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #495057; margin-bottom: 12px;">Month over Month</div>
             <div class="text-colored" style="font-size: 42px; font-weight: 700; color: {mom_color}; line-height: 1; margin-bottom: 8px;">
                 {mom_arrow} ${abs(mom_change):,.2f}
             </div>
@@ -1823,8 +1829,74 @@ def run_spending_analysis():
     logger.info("="*60)
 
 
+def regenerate_month_email(year: int, month: int):
+    """Regenerate and send email for a specific month from existing data"""
+    logger.info("="*60)
+    logger.info(f"REGENERATING EMAIL FOR {year}-{month:02d}")
+    logger.info("="*60)
+
+    try:
+        history = DataStore.load_history()
+        month_key = f"{year}-{month:02d}"
+
+        if month_key not in history:
+            logger.error(f"✗ No data found for {month_key}")
+            logger.info(f"Available months: {', '.join(sorted(history.keys()))}")
+            return
+
+        month_data = history[month_key]
+
+        # Reconstruct transactions from stored data
+        transactions = [
+            Transaction(
+                date=datetime.fromisoformat(tx['date']),
+                description=tx['description'],
+                amount=tx['amount'],
+                merchant=tx['merchant'],
+                source=tx['source'],
+                raw_data=tx.get('raw_data', {})
+            )
+            for tx in month_data['transactions']
+        ]
+
+        # Restore category assignments
+        for tx_obj, tx_data in zip(transactions, month_data['transactions']):
+            tx_obj.category = tx_data.get('category')
+            tx_obj.is_subscription = tx_data.get('is_subscription', False)
+
+        month_name = datetime(year, month, 1).strftime('%B %Y')
+        logger.info(f"Loaded {len(transactions)} transactions for {month_name}")
+
+        # Generate and send email
+        html_report = generate_html_report(year, month, transactions)
+        subject = f"💳 Spending Report — {month_name}"
+        send_email(subject, html_report)
+
+        logger.info("✓ Email regenerated and sent!")
+
+    except Exception as e:
+        logger.error(f"✗ Error regenerating email: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+    logger.info("="*60)
+
+
 def main():
     """Main entry point with scheduler"""
+
+    # Check for --month flag to regenerate specific month
+    if '--month' in sys.argv:
+        try:
+            idx = sys.argv.index('--month')
+            month_str = sys.argv[idx + 1]  # Format: YYYY-MM
+            year, month = map(int, month_str.split('-'))
+            logger.info(f"Regenerating email for {year}-{month:02d} (--month flag detected)")
+            regenerate_month_email(year, month)
+            return
+        except (IndexError, ValueError) as e:
+            logger.error("✗ Invalid --month format. Use: --month YYYY-MM (e.g., --month 2026-01)")
+            return
 
     # Check for --now flag for immediate run
     if '--now' in sys.argv:
@@ -1839,6 +1911,7 @@ def main():
     logger.info("Will check for new CSVs daily at 8:00 AM")
     logger.info("Waiting for next scheduled run...")
     logger.info("(Use --now flag to run immediately)")
+    logger.info("(Use --month YYYY-MM to regenerate specific month)")
 
     while True:
         schedule.run_pending()
