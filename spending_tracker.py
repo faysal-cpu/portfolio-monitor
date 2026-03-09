@@ -130,7 +130,8 @@ class Transaction:
             'merchant': self.merchant,
             'source': self.source,
             'category': self.category,
-            'is_subscription': self.is_subscription
+            'is_subscription': self.is_subscription,
+            'raw_data': self.raw_data
         }
 
 
@@ -390,12 +391,13 @@ class CSVParser:
                     continue
                 date_str = date_parts[1]
 
-                # Extract description (join both parts of second field)
+                # Extract description - use ONLY the second part after the colon
+                # The first part (e.g., "Amazon.ae") is an export artifact, not the merchant
                 desc_parts = row[1].split(':')
-                if len(desc_parts) < 2:
-                    description = row[1]  # fallback to whole field
+                if len(desc_parts) >= 2:
+                    description = desc_parts[-1].strip()  # Use last part only
                 else:
-                    description = ' '.join(desc_parts)
+                    description = row[1].strip()
 
                 # Extract amount from "Unnamed: 3:VALUE" field (row[3])
                 if 'Unnamed: 3' in row[3]:
@@ -618,7 +620,7 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
         'AMERICAN AIRLINES', 'AA.COM', 'SOUTHWEST', 'ALLEGIANT', 'SPIRIT AIRLINES',
         'FRONTIER', 'BRITISH AIRWAYS', 'LUFTHANSA', 'KLM', 'EXPEDIA', 'BOOKING.COM',
         'HOTELS.COM', 'AIRBNB', 'MARRIOTT', 'HILTON', 'HYATT', 'HOLIDAY INN',
-        'ZENHOTELS', 'TRIVAGO', 'KAYAK'
+        'ZENHOTELS', 'TRIVAGO', 'KAYAK', 'BRIGHTLINE'
     ]
     for keyword in travel_keywords:
         if keyword in text:
@@ -626,7 +628,7 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
 
     # STEP 3: TRANSPORT (ground transportation, gas, parking)
     transport_keywords = [
-        'UBER', 'LYFT', 'TAXI', 'CAB', 'PARKING TICKET', 'PARKING METER', 'GREEN P',
+        'UBER', 'LYFT', 'BOLT', 'TAXI', 'CAB', 'PARKING TICKET', 'PARKING METER', 'GREEN P',
         'TTC', 'GO TRANSIT', 'PRESTO', 'SHELL', 'ESSO', 'PETRO-CANADA',
         'CANADIAN TIRE GAS', 'COSTCO GAS', 'COSTCO FUEL', 'ZIPCAR', 'CAR2GO',
         'ENTERPRISE RENT'
@@ -856,10 +858,11 @@ STEP 2: CHECK FOR TRAVEL (if merchant contains ANY of these keywords → Travel)
 - "EXPEDIA", "BOOKING.COM", "HOTELS.COM", "AIRBNB"
 - "MARRIOTT", "HILTON", "HYATT", "HOLIDAY INN"
 - "ZENHOTELS", "TRIVAGO", "KAYAK"
+- "BRIGHTLINE" (Florida intercity rail)
 - Flight booking codes (numbers + letters like "6UBTM6", "DIR")
 
 STEP 3: CHECK FOR TRANSPORT (if merchant contains ANY of these keywords → Transport):
-- "UBER", "LYFT"
+- "UBER", "LYFT", "BOLT"
 - "TAXI", "CAB"
 - "PARKING TICKET", "PARKING METER", "GREEN P"
 - "TTC", "GO TRANSIT", "PRESTO"
@@ -1044,7 +1047,7 @@ class DataStore:
         history[month_key] = {
             'year': year,
             'month': month,
-            'total_spent': sum(tx.amount for tx in transactions),
+            'total_spent': sum(tx.amount for tx in transactions if tx.amount > 0),
             'transaction_count': len(transactions),
             'category_totals': category_totals,
             'merchant_totals': merchant_totals,
@@ -1155,22 +1158,44 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
                        'MIAMI', 'NAPLES', 'FORT LAUDERDA', 'WILTON MANORS']
 
     def is_foreign(tx):
-        # Check raw data for country code (Rogers Mastercard)
+        # Check raw data for country code (Rogers Mastercard has this)
         country_code = tx.raw_data.get('Merchant Country Code', '').upper()
         if country_code and country_code not in ['CAN', '']:
             return True
-        # Check currency field (Wealthsimple CC)
-        currency = tx.raw_data.get('currency', '').upper()
-        if currency and currency != 'CAD':
+
+        # Check merchant city/state from Rogers raw data
+        merchant_city = tx.raw_data.get('Merchant City', '').upper()
+        merchant_state = tx.raw_data.get('Merchant State or Province', '').upper()
+        foreign_cities = ['MIAMI', 'MIAMI BEACH', 'FORT LAUDERDA', 'NAPLES', 'WILTON MANORS',
+                          'SAN FRANCISCO', 'DUBAI', 'ABU DHABI', 'ABUDHABI', 'CANCUN',
+                          'CIUDAD DE MEX', 'ISLA MUJERES', 'BENITO JUAREZ', 'ALAJUELA',
+                          'LIMASSOL', 'EDMONTON INTE']
+        if any(city in merchant_city for city in foreign_cities):
             return True
-        # Check merchant/description text for foreign location indicators
+
+        # For Wealthsimple CC and Amex: check merchant name/description text
+        # These banks don't store country codes, so we use merchant name patterns
         text = (tx.description + ' ' + tx.merchant).upper()
         foreign_indicators = [
-            'DUBAI', 'ABU DHABI', 'UAE', 'MIAMI', 'FLORIDA', 'NAPLES', 'FORT LAUDERDA',
-            'WILTON MANORS', 'MEXICO', 'CANCUN', 'ISLA MUJELES', 'CIUDAD DE MEX',
-            'MERPAGO', 'OXXO', 'SUPERCHE', 'ALAJUELA', 'COSTA RICA',
-            'IRELAND', 'LONDON', 'STOCKHOLM', 'SAN FRANCISCO', 'NEW YORK',
-            'NAPLES FL', 'BENITO JUAREZ'
+            # Mexico - specific patterns from Wealthsimple CC Mexico transactions
+            'MERPAGO', 'OXXO', 'SUPERCHE', 'CANCUN', 'CIUDAD DE MEX',
+            'ISLA MUJERES', 'ISLA MUJER', 'BENITO JUAREZ',
+            'CHICHIS AND CHARLIES', 'REST MONKEY BUSINESS', 'REST MEXTREME',
+            'REST PALAPITA', 'MANGO CAFE', 'ABARROTES', 'ESPIRAL',
+            'TICKET TOURS MXN', 'DLO*DIDI', 'D LOCAL*DIDI',
+            # Travel data SIM (used internationally)
+            'GIGSKY',
+            # Middle East
+            'DUBAI', 'ABU DHABI', 'ABUDHABI', 'TALABAT', 'QLUB', 'CPAY-NOW-AED',
+            'TRYANO', 'AJMAL', 'ALMANDOOS', 'ARABIAN HOUSE', 'ADNOC',
+            # USA locations (for Amex which doesn't have country codes)
+            'MIAMI', 'FLORIDA', 'FORT LAUDERDA', 'WILTON MANORS', 'NAPLES FL',
+            # Costa Rica
+            'ALAJUELA', 'COSTA RICA',
+            # Europe
+            'SOLIHULL', 'STOCKHOLM',
+            # Hotels/services with foreign city in name
+            'SELINA CANCUN', 'CHELSEA HOTEL', 'RADISSON BLU',
         ]
         return any(indicator in text for indicator in foreign_indicators)
 
@@ -1220,6 +1245,16 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
                     'amount': tx_dict['amount'],
                     'date': datetime.fromisoformat(tx_dict['date'])
                 })
+
+    # Deduplicate transactions (same transaction can appear in multiple months if CSV files overlap)
+    seen_tx = set()
+    deduped_all = []
+    for tx in all_transactions:
+        tx_key = (tx['date'].date(), tx['merchant'][:25].upper().strip(), round(tx['amount'], 2))
+        if tx_key not in seen_tx:
+            seen_tx.add(tx_key)
+            deduped_all.append(tx)
+    all_transactions = deduped_all
 
     # Group by normalized merchant name
     merchant_groups = defaultdict(list)
@@ -1292,7 +1327,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                          data_quality: Dict[str, Any] = None) -> str:
     """Generate clean single-column responsive HTML report"""
 
-    total_spent = sum(tx.amount for tx in transactions)
+    total_spent = sum(tx.amount for tx in transactions if tx.amount > 0)
 
     # Category totals: only include positive amounts (spending), exclude refunds/cashback
     category_totals = defaultdict(float)
@@ -1346,11 +1381,14 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
     # Calculate YTD: sum only months from January up to current month
     history = DataStore.load_history()
+    current_key = f"{year}-{month:02d}"
     ytd_total = sum(
         data['total_spent']
         for key, data in history.items()
         if key.startswith(str(year)) and int(key.split('-')[1]) <= month
     )
+    if current_key not in history:
+        ytd_total += total_spent
 
     month_name = datetime(year, month, 1).strftime('%B %Y').upper()
     month_only = datetime(year, month, 1).strftime('%B').upper()
@@ -2213,10 +2251,12 @@ def run_spending_analysis():
         all_transactions.sort(key=lambda x: x.date)
 
         # Deduplicate transactions (overlapping CSV files cause duplicates)
+        # Use raw description (not cleaned merchant) to preserve legitimate duplicate charges
+        # that have the same merchant name but different underlying transaction references
         seen = set()
         deduped = []
         for tx in all_transactions:
-            key = (tx.date.date(), round(tx.amount, 2), tx.merchant[:30].upper().strip(), tx.source)
+            key = (tx.date.date(), round(tx.amount, 2), tx.description[:40].upper().strip(), tx.source)
             if key not in seen:
                 seen.add(key)
                 deduped.append(tx)
@@ -2318,6 +2358,44 @@ def regenerate_month_email(year: int, month: int):
 
 def main():
     """Main entry point with scheduler"""
+
+    # Check for --check flag to diagnose Drive files and processing status
+    if '--check' in sys.argv:
+        logger.info("\n" + "="*60)
+        logger.info("GOOGLE DRIVE FILE STATUS CHECK")
+        logger.info("="*60)
+        try:
+            drive_monitor = GoogleDriveMonitor(GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_DRIVE_FOLDER_ID)
+            query = f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType='text/csv' and trashed=false"
+            results = drive_monitor.service.files().list(
+                q=query,
+                fields='files(id, name, modifiedTime, size)',
+                orderBy='name'
+            ).execute()
+            files = results.get('files', [])
+            logger.info(f"\nFound {len(files)} CSV files in Google Drive folder:\n")
+            unprocessed_count = 0
+            for f in files:
+                is_processed = drive_monitor._is_processed(f['id'])
+                status = "✓ PROCESSED  " if is_processed else "✗ UNPROCESSED"
+                size_kb = int(f.get('size', 0)) // 1024
+                logger.info(f"  {status} | {f['name']:<50} | {size_kb:>4} KB | ID: {f['id']}")
+                if not is_processed:
+                    unprocessed_count += 1
+            logger.info(f"\nSummary: {len(files) - unprocessed_count} processed, {unprocessed_count} unprocessed")
+            logger.info("\nProcessed markers on disk:")
+            if PROCESSED_DIR.exists():
+                markers = sorted(PROCESSED_DIR.glob('*.marker'))
+                logger.info(f"  {len(markers)} marker file(s) found")
+                for marker in markers:
+                    data = json.loads(marker.read_text())
+                    logger.info(f"  → {data.get('filename', 'unknown')} | processed: {data.get('processed_at', 'unknown')[:19]}")
+            else:
+                logger.info("  No processed_csvs directory found (all files are unprocessed)")
+            logger.info("="*60)
+        except Exception as e:
+            logger.error(f"Error during check: {e}")
+        return
 
     # Check for --reset flag to clear all historical data
     if '--reset' in sys.argv:
