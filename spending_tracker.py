@@ -807,8 +807,10 @@ class ClaudeCategorizer:
         if detailed:
             prompt = f"""You are a financial categorization assistant. Categorize each transaction into EXACTLY ONE of these categories (use the exact spelling):
 
+Groceries
 Food & Dining
 Transport
+Travel
 Bills & Utilities
 Entertainment
 Health
@@ -1109,7 +1111,8 @@ def normalize_merchant_name(merchant: str) -> str:
     normalized = re.sub(r'#\d+', '', normalized)   # Remove #123
     normalized = re.sub(r'\d{2}/\d{2}', '', normalized)  # Remove dates
     normalized = re.sub(r'\s+', ' ', normalized).strip().upper()
-    return normalized[:30]  # First 30 chars
+    # Return normalized or original (uppercase) if normalization resulted in empty string
+    return normalized[:30] if normalized.strip() else merchant.upper()[:30]
 
 
 def clean_merchant_for_display(merchant: str) -> str:
@@ -1240,14 +1243,19 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
     }
 
 
-def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
+def detect_pattern_subscriptions(year: int, month: int, current_month_txs: List[Transaction] = None) -> List[Dict[str, Any]]:
     """Detect subscriptions using pattern-based approach across historical data
 
     Criteria:
     - Merchant appears 3+ times in consecutive months
     - Amounts within 20% variation
-    - Intervals of 28-35 days
+    - Intervals of 27-36 days
     - Credit card purchases only (not bank debits/payments)
+
+    Args:
+        year: Current year
+        month: Current month
+        current_month_txs: Optional list of current month's transactions (not yet in history)
     """
     history = DataStore.load_history()
 
@@ -1269,6 +1277,16 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
                     'merchant': tx_dict['merchant'],
                     'amount': tx_dict['amount'],
                     'date': datetime.fromisoformat(tx_dict['date'])
+                })
+
+    # Add current month's transactions if provided (not yet in history)
+    if current_month_txs:
+        for tx in current_month_txs:
+            if tx.amount > 0:  # Only include positive amounts (spending)
+                all_transactions.append({
+                    'merchant': tx.merchant,
+                    'amount': tx.amount,
+                    'date': tx.date
                 })
 
     # Deduplicate transactions (same transaction can appear in multiple months if CSV files overlap)
@@ -1391,8 +1409,8 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
     top_merchants = sorted(merchant_totals.items(), key=lambda x: x[1]['amount'], reverse=True)[:10]
 
-    # Use pattern-based subscription detection
-    subscriptions = detect_pattern_subscriptions(year, month)
+    # Use pattern-based subscription detection (pass current month's transactions)
+    subscriptions = detect_pattern_subscriptions(year, month, transactions)
     # Only sum positive subscription amounts
     subscription_total = sum(sub['avg_amount'] for sub in subscriptions if sub['avg_amount'] > 0)
 
@@ -2415,12 +2433,11 @@ def run_spending_analysis():
         all_transactions.sort(key=lambda x: x.date)
 
         # Deduplicate transactions (overlapping CSV files cause duplicates)
-        # Use raw description (not cleaned merchant) to preserve legitimate duplicate charges
-        # that have the same merchant name but different underlying transaction references
+        # Use normalized merchant name for better deduplication across varying descriptions
         seen = set()
         deduped = []
         for tx in all_transactions:
-            key = (tx.date.date(), round(tx.amount, 2), tx.description[:40].upper().strip(), tx.source)
+            key = (tx.date.date(), round(tx.amount, 2), normalize_merchant_name(tx.merchant), tx.source)
             if key not in seen:
                 seen.add(key)
                 deduped.append(tx)
