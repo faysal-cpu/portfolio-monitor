@@ -618,9 +618,14 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
         'FLAIR', 'PORTER', 'PORTERAIR', 'AIR CANADA', 'AIRCANADA', 'WESTJET',
         'UNITED AIRLINES', 'UNITED AIR', 'DELTA AIRLINES', 'DELTA AIR',
         'AMERICAN AIRLINES', 'AA.COM', 'SOUTHWEST', 'ALLEGIANT', 'SPIRIT AIRLINES',
-        'FRONTIER', 'BRITISH AIRWAYS', 'LUFTHANSA', 'KLM', 'EXPEDIA', 'BOOKING.COM',
-        'HOTELS.COM', 'AIRBNB', 'MARRIOTT', 'HILTON', 'HYATT', 'HOLIDAY INN',
-        'ZENHOTELS', 'TRIVAGO', 'KAYAK', 'BRIGHTLINE'
+        'FRONTIER', 'BRITISH AIRWAYS', 'LUFTHANSA', 'KLM',
+        'VIA RAIL', 'TRAIN', 'RAILWAY', 'GREYHOUND', 'MEGABUS',
+        'CRUISE', 'CRUISE LINE', 'CARNIVAL', 'ROYAL CARIBBEAN',
+        'EXPEDIA', 'BOOKING.COM', 'HOTELS.COM', 'AIRBNB',
+        'MARRIOTT', 'HILTON', 'HYATT', 'HOLIDAY INN', 'RESORT',
+        'ZENHOTELS', 'TRIVAGO', 'KAYAK', 'HOTWIRE',
+        'TOURISM', 'TOUR OPERATOR', 'THEME PARK', 'ATTRACTION',
+        'BRIGHTLINE'
     ]
     for keyword in travel_keywords:
         if keyword in text:
@@ -628,10 +633,16 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
 
     # STEP 3: TRANSPORT (ground transportation, gas, parking)
     transport_keywords = [
-        'UBER', 'LYFT', 'BOLT', 'TAXI', 'CAB', 'BECK TAXI', 'PARKING TICKET', 'PARKING METER',
-        'GREEN P', 'TTC', 'GO TRANSIT', 'PRESTO', 'SHELL', 'ESSO', 'PETRO-CANADA',
-        'CANADIAN TIRE GAS', 'COSTCO GAS', 'COSTCO FUEL', 'ZIPCAR', 'CAR2GO',
-        'ENTERPRISE RENT', 'SIXT', 'BUDGET RENT'
+        'UBER', 'LYFT', 'BOLT', 'TAXI', 'CAB', 'BECK TAXI',
+        'PARKING TICKET', 'PARKING METER', 'GREEN P', 'PARKING GARAGE',
+        'TTC', 'GO TRANSIT', 'PRESTO', 'BUS PASS', 'TRANSIT PASS',
+        'SHELL', 'ESSO', 'PETRO-CANADA', 'CHEVRON', 'MOBIL',
+        'CANADIAN TIRE GAS', 'COSTCO GAS', 'COSTCO FUEL',
+        'TESLA SUPERCHARGER', 'EV CHARGING', 'CHARGEPOINT',
+        'CAR WASH', 'VEHICLE MAINTENANCE',
+        'OIL CHANGE', 'TIRE', 'BRAKE', 'AUTOMOTIVE REPAIR',
+        'REGISTRATION', 'LICENSE PLATE',
+        'ZIPCAR', 'CAR2GO', 'ENTERPRISE RENT', 'SIXT', 'BUDGET RENT', 'HERTZ'
     ]
     # Also check for generic gas/fuel indicators
     if any(keyword in text for keyword in transport_keywords):
@@ -641,9 +652,12 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
 
     # STEP 4: BILLS & UTILITIES
     bills_keywords = [
-        'ROGERS', 'BELL CANADA', 'TELUS', 'FIDO', 'KOODO', 'ENBRIDGE',
-        'TORONTO HYDRO', 'HYDRO ONE', 'MEMBERSHIP FEE', 'ANNUAL FEE',
-        'INSTALLMENT', 'INSURANCE', 'COOPERATORS', 'DUUO', 'AFFIRM'
+        'ROGERS', 'BELL CANADA', 'TELUS', 'FIDO', 'KOODO',
+        'SPECTRUM', 'COMCAST', 'XFINITY', 'SHAW', 'VIDEOTRON',
+        'ENBRIDGE', 'TORONTO HYDRO', 'HYDRO ONE', 'HYDRO QUEBEC',
+        'ELECTRICITY', 'ELECTRIC COMPANY', 'WATER BILL', 'GARBAGE', 'WASTE MANAGEMENT',
+        'MEMBERSHIP FEE', 'ANNUAL FEE', 'INSTALLMENT',
+        'INSURANCE', 'COOPERATORS', 'DUUO', 'AFFIRM'
     ]
     for keyword in bills_keywords:
         if keyword in text:
@@ -652,9 +666,15 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     # STEP 5: HEALTH (exclude veterinary)
     if not any(vet_keyword in text for vet_keyword in ['VET', 'VETERINARY', 'ANIMAL']):
         health_keywords = [
-            'PHARMACY', 'PHARMA', 'SHOPPERS DRUG MART', 'REXALL', 'ORTHODONTIC',
-            'ORTHO', 'DENTAL', 'DENTIST', 'MEDICAL', 'CLINIC', 'HOSPITAL',
-            'DR ', 'DOCTOR', 'OPTOMETRY', 'VISION CARE', 'EYE CARE',
+            'PHARMACY', 'PHARMA', 'SHOPPERS DRUG MART', 'REXALL', 'CVS',
+            'ORTHODONTIC', 'ORTHO', 'DENTAL', 'DENTIST',
+            'MEDICAL', 'CLINIC', 'HOSPITAL', 'DR ', 'DOCTOR',
+            'OPTOMETRY', 'OPTOMETRIST', 'OPHTHALMOLOGIST', 'VISION CARE', 'EYE CARE', 'LENSCRAFTERS',
+            'THERAPIST', 'PSYCHOLOGIST', 'COUNSELOR', 'THERAPY',
+            'PHYSICAL THERAPY', 'PHYSIOTHERAPY', 'PHYSIO',
+            'CHIROPRACTOR', 'CHIRO', 'ACUPUNCTURE', 'ACUPUNCTURIST',
+            'NUTRITIONIST', 'DIETITIAN', 'DIETICIAN',
+            'LAB', 'LABORATORY', 'BLOODWORK', 'PATHOLOGY',
             'MASSAGE', 'STEP UP', 'EPPIX'
         ]
         for keyword in health_keywords:
@@ -664,6 +684,12 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     # STEP 6: ENTERTAINMENT
     entertainment_keywords = [
         'NETFLIX', 'SPOTIFY', 'DISNEY', 'APPLE TV', 'AMAZON PRIME VIDEO',
+        'HULU', 'HBOMAX', 'HBO MAX', 'PARAMOUNT', 'MAX STREAMING',
+        'TWITCH', 'YOUTUBE PREMIUM', 'YOUTUBE MUSIC',
+        'PLAYSTATION NETWORK', 'PSPLUS', 'XBOX LIVE', 'XBOX GAMEPASS', 'NINTENDO',
+        'AUDIBLE', 'SCRIBD', 'KINDLE UNLIMITED',
+        'HEADSPACE', 'CALM', 'MEDITOPIA',
+        'PELOTON', 'BEACHBODY', 'FITBIT PREMIUM',
         'MIRVISH', 'CINEPLEX', 'LANDMARK CINEMA', 'GOODLIFE', 'LA FITNESS',
         'YMCA', 'GYM', 'THEATRE', 'THEATER', 'CONCERT', 'CLASSPASS', 'GROUPON',
         'TICKETMASTER', 'SEATGEEK', 'DICE.FM'
@@ -674,10 +700,15 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
 
     # STEP 7: FOOD & DINING
     dining_keywords = [
-        'RESTAURANT', 'BISTRO', 'CAFE', 'COFFEE', 'BAR', 'PUB', 'STARBUCKS',
-        'TIM HORTONS', 'SECOND CUP', 'BALZAC', 'MCDONALD', 'BURGER KING', 'WENDY',
-        'KFC', 'SUBWAY', 'A&W', 'PIZZA', 'SHAWARMA', 'RAMEN', 'SUSHI',
-        'UBEREATS', 'DOORDASH', 'SKIP THE DISHES', 'FOODORA'
+        'RESTAURANT', 'BISTRO', 'CAFE', 'COFFEE', 'BAR', 'PUB',
+        'STARBUCKS', 'TIM HORTONS', 'SECOND CUP', 'BALZAC',
+        'MCDONALD', 'BURGER KING', 'WENDY', 'KFC', 'SUBWAY', 'A&W',
+        'CHIPOTLE', 'QDOBA', 'TACO BELL',
+        'PIZZA', 'SHAWARMA', 'RAMEN', 'SUSHI',
+        'THAI', 'VIETNAMESE', 'CHINESE', 'JAPANESE', 'INDIAN',
+        'STEAKHOUSE', 'DINER', 'PANCAKE HOUSE', 'BRUNCH',
+        'BAKERY', 'PASTRY', 'JUICE BAR', 'SMOOTHIE',
+        'UBEREATS', 'DOORDASH', 'SKIP THE DISHES', 'FOODORA', 'GRUBHUB'
     ]
     for keyword in dining_keywords:
         if keyword in text:
@@ -687,8 +718,14 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     shopping_keywords = [
         'AMAZON.CA', 'AMAZON.COM', 'AMZN', 'BEST BUY', 'STAPLES', 'HOME DEPOT',
         'CANADIAN TIRE', 'WWW.CANADIANTIRE.CA', 'H&M', 'ZARA', 'WINNERS', 'MARSHALLS',
-        'TARGET', 'ALCANSIDE', 'TEMU.COM', 'TEMU', 'AMERICAN EAGLE', 'BROWN\'S SHOES',
-        'CARTERS', 'WARBY PARKER'
+        'TARGET', 'WALMART', 'ALCANSIDE', 'TEMU.COM', 'TEMU',
+        'SHOPIFY', 'ETSY', 'DEPOP', 'VINTED', 'POSHMARK',
+        'IKEA', 'POTTERY BARN', 'WEST ELM', 'CRATE AND BARREL',
+        'NIKE', 'ADIDAS', 'LULULEMON', 'ATHLETA', 'UNDER ARMOUR',
+        'SHEIN', 'FASHION NOVA', 'FOREVER 21', 'UNIQLO',
+        'SEPHORA', 'ULTA', 'BEAUTY COUNTER', 'MAKEUP',
+        'APPLE STORE', 'MICROSOFT STORE',
+        'AMERICAN EAGLE', 'BROWN\'S SHOES', 'CARTERS', 'WARBY PARKER'
     ]
     for keyword in shopping_keywords:
         if keyword in text:
@@ -851,70 +888,78 @@ STEP 1: CHECK FOR GROCERIES (if merchant contains ANY of these keywords → Groc
 - "SUPERMARKET", "GROCERY", "MARKET" (in name)
 
 STEP 2: CHECK FOR TRAVEL (if merchant contains ANY of these keywords → Travel):
-- "FLAIR", "FLAIR AIR", "FLAIR AIRLINES"
-- "PORTER", "PORTERAIR", "PORTER AIRLINES"
-- "AIR CANADA", "AIRCANADA"
-- "WESTJET"
-- "UNITED AIRLINES", "UNITED AIR"
-- "DELTA AIRLINES", "DELTA AIR"
-- "AMERICAN AIRLINES", "AA.COM"
-- "SOUTHWEST AIRLINES"
-- "ALLEGIANT", "SPIRIT AIRLINES", "FRONTIER"
-- "BRITISH AIRWAYS", "LUFTHANSA", "KLM"
-- "EXPEDIA", "BOOKING.COM", "HOTELS.COM", "AIRBNB"
-- "MARRIOTT", "HILTON", "HYATT", "HOLIDAY INN"
-- "ZENHOTELS", "TRIVAGO", "KAYAK"
-- "BRIGHTLINE" (Florida intercity rail)
+- Airlines: "FLAIR", "PORTER", "PORTERAIR", "AIR CANADA", "AIRCANADA", "WESTJET"
+- US Airlines: "UNITED AIRLINES", "DELTA AIRLINES", "AMERICAN AIRLINES", "AA.COM", "SOUTHWEST", "ALLEGIANT", "SPIRIT AIRLINES", "FRONTIER"
+- International Airlines: "BRITISH AIRWAYS", "LUFTHANSA", "KLM"
+- Booking: "EXPEDIA", "BOOKING.COM", "HOTELS.COM", "AIRBNB"
+- Hotels: "MARRIOTT", "HILTON", "HYATT", "HOLIDAY INN", "ZENHOTELS", "TRIVAGO", "KAYAK", "RESORT"
+- Rail: "BRIGHTLINE" (Florida intercity rail), "VIA RAIL", "TRAIN", "RAILWAY"
+- Bus: "GREYHOUND", "MEGABUS"
+- Cruises: "CRUISE", "CRUISE LINE", "CARNIVAL", "ROYAL CARIBBEAN"
+- Activities: "TOURISM", "TOUR OPERATOR", "THEME PARK", "ATTRACTION"
 - Flight booking codes (numbers + letters like "6UBTM6", "DIR")
 
 STEP 3: CHECK FOR TRANSPORT (if merchant contains ANY of these keywords → Transport):
-- "UBER", "LYFT", "BOLT"
-- "TAXI", "CAB", "BECK TAXI"
-- "PARKING TICKET", "PARKING METER", "GREEN P"
-- "TTC", "GO TRANSIT", "PRESTO"
-- "SHELL", "ESSO", "PETRO-CANADA", "CANADIAN TIRE GAS", "COSTCO GAS"
-- Gas stations (anything with "GAS", "FUEL", "PETROL")
-- "ZIPCAR", "CAR2GO", "ENTERPRISE RENT", "SIXT", "BUDGET RENT"
+- Rideshare: "UBER", "LYFT", "BOLT"
+- Taxi: "TAXI", "CAB", "BECK TAXI"
+- Parking: "PARKING TICKET", "PARKING METER", "GREEN P", "APCOA" (parking)
+- Transit: "TTC", "GO TRANSIT", "PRESTO", "BUS PASS", "TRANSIT PASS"
+- Gas: "SHELL", "ESSO", "PETRO-CANADA", "CANADIAN TIRE GAS", "COSTCO GAS"
+- Gas stations: Anything with "GAS", "FUEL", "PETROL"
+- EV Charging: "TESLA SUPERCHARGER", "EV CHARGING", "CHARGEPOINT"
+- Rental: "ZIPCAR", "CAR2GO", "ENTERPRISE RENT", "SIXT", "BUDGET RENT", "HERTZ"
+- Maintenance: "CAR WASH", "VEHICLE MAINTENANCE", "OIL CHANGE", "TIRE", "BRAKE", "AUTOMOTIVE REPAIR"
+- Registration: "REGISTRATION", "LICENSE PLATE"
 
 STEP 4: CHECK FOR BILLS & UTILITIES (if merchant contains ANY of these keywords → Bills & Utilities):
-- "ROGERS", "BELL CANADA", "TELUS", "FIDO", "KOODO"
-- "ENBRIDGE", "TORONTO HYDRO", "HYDRO ONE"
-- "MEMBERSHIP FEE", "ANNUAL FEE", "INSTALLMENT"
-- "INSURANCE", "COOPERATORS", "DUUO"
-- "AFFIRM" (buy now pay later financing)
+- Telecom: "ROGERS", "BELL CANADA", "TELUS", "FIDO", "KOODO", "SPECTRUM", "COMCAST", "XFINITY", "SHAW", "VIDEOTRON"
+- Utilities: "ENBRIDGE", "TORONTO HYDRO", "HYDRO ONE", "ELECTRICITY", "ELECTRIC COMPANY", "WATER BILL", "GARBAGE", "WASTE MANAGEMENT"
+- Fees: "MEMBERSHIP FEE", "ANNUAL FEE", "INSTALLMENT"
+- Insurance: "INSURANCE", "COOPERATORS", "DUUO"
+- Financing: "AFFIRM" (buy now pay later)
 - Credit card fees with "FEE" in name
 
 STEP 5: CHECK FOR HEALTH (if merchant contains ANY of these keywords → Health):
-- "PHARMACY", "PHARMA", "SHOPPERS DRUG MART", "REXALL"
-- "ORTHODONTIC", "ORTHO", "DENTAL", "DENTIST"
-- "MEDICAL", "CLINIC", "HOSPITAL", "DR ", "DOCTOR"
-- "OPTOMETRY", "VISION CARE", "EYE CARE"
-- "MASSAGE", "STEP UP" (massage therapy)
-- "EPPIX" (medication)
+- Pharmacy: "PHARMACY", "PHARMA", "SHOPPERS DRUG MART", "REXALL", "CVS", "WALGREENS", "CHEMIST"
+- Dental: "ORTHODONTIC", "ORTHO", "DENTAL", "DENTIST"
+- Medical: "MEDICAL", "CLINIC", "HOSPITAL", "DR ", "DOCTOR"
+- Vision: "OPTOMETRY", "OPTOMETRIST", "VISION CARE", "EYE CARE", "EYEGLASSES"
+- Therapy: "MASSAGE", "STEP UP" (massage therapy), "PHYSICAL THERAPY", "PHYSIOTHERAPY", "PHYSIO"
+- Specialists: "CHIROPRACTOR", "CHIRO", "ACUPUNCTURE", "ACUPUNCTURIST"
+- Nutrition: "NUTRITIONIST", "DIETITIAN", "DIETICIAN"
+- Labs: "LAB", "LABORATORY", "BLOODWORK", "PATHOLOGY"
+- Mental Health: "THERAPIST", "PSYCHOLOGIST", "COUNSELOR", "THERAPY"
+- Medication: "EPPIX"
 - IMPORTANT: If "VET" or "VETERINARY" or "ANIMAL" → Other (NOT Health)
 
 STEP 6: CHECK FOR ENTERTAINMENT (if merchant contains ANY of these keywords → Entertainment):
-- "NETFLIX", "SPOTIFY", "DISNEY", "APPLE TV", "AMAZON PRIME VIDEO"
-- "MIRVISH", "CINEPLEX", "LANDMARK CINEMA"
-- "GOODLIFE", "LA FITNESS", "YMCA", "GYM", "CLASSPASS"
-- "THEATRE", "THEATER", "CONCERT", "GROUPON"
-- "TICKETMASTER", "SEATGEEK", "DICE.FM"
+- Streaming: "NETFLIX", "SPOTIFY", "DISNEY", "HULU", "HBOMAX", "PARAMOUNT", "APPLE TV", "AMAZON PRIME VIDEO"
+- Gaming: "TWITCH", "YOUTUBE PREMIUM", "PLAYSTATION", "XBOX", "NINTENDO"
+- Audio/Books: "AUDIBLE", "SCRIBD", "KINDLE UNLIMITED"
+- Wellness: "HEADSPACE", "CALM", "MEDITOPIA"
+- Fitness: "PELOTON", "BEACHBODY", "FITBIT PREMIUM", "GOODLIFE", "LA FITNESS", "YMCA", "GYM", "CLASSPASS"
+- Events/Venues: "MIRVISH", "CINEPLEX", "LANDMARK CINEMA", "THEATRE", "THEATER", "CONCERT", "GROUPON"
+- Tickets: "TICKETMASTER", "SEATGEEK", "DICE.FM"
 
 STEP 7: CHECK FOR FOOD & DINING (restaurants, cafes, fast food):
-- "RESTAURANT", "BISTRO", "CAFE", "COFFEE", "BAR", "PUB"
-- "STARBUCKS", "TIM HORTONS", "SECOND CUP", "BALZAC"
-- "MCDONALD", "BURGER KING", "WENDY", "KFC", "SUBWAY", "A&W", "PIZZA"
-- "SHAWARMA", "RAMEN", "SUSHI"
-- "UBEREATS", "DOORDASH", "SKIP THE DISHES", "FOODORA"
-- "BIFF", "FOXLEY", "MONKEY BUSINESS" (Toronto restaurants)
+- General: "RESTAURANT", "BISTRO", "CAFE", "COFFEE", "BAR", "PUB", "DINER", "STEAKHOUSE", "BRUNCH"
+- Coffee: "STARBUCKS", "TIM HORTONS", "SECOND CUP", "BALZAC"
+- Fast Food: "MCDONALD", "BURGER KING", "WENDY", "KFC", "SUBWAY", "A&W", "CHIPOTLE", "QDOBA", "TACO BELL"
+- Cuisine: "PIZZA", "SHAWARMA", "RAMEN", "SUSHI", "THAI", "VIETNAMESE", "CHINESE", "JAPANESE", "INDIAN"
+- Specialty: "BAKERY", "PASTRY", "JUICE BAR", "SMOOTHIE", "PANCAKE HOUSE"
+- Delivery: "UBEREATS", "DOORDASH", "SKIP THE DISHES", "FOODORA", "GRUBHUB"
+- Local: "BIFF", "FOXLEY", "MONKEY BUSINESS"
 
 STEP 8: CHECK FOR SHOPPING (retail, Amazon, general stores):
-- "AMAZON.CA", "AMAZON.COM", "AMZN"
-- "BEST BUY", "STAPLES", "HOME DEPOT", "CANADIAN TIRE", "WWW.CANADIANTIRE.CA"
-- "H&M", "ZARA", "WINNERS", "MARSHALLS"
-- "TARGET", "WALMART" (not grocery)
-- "ALCANSIDE" (phone cases), "TEMU.COM", "TEMU"
-- "AMERICAN EAGLE", "BROWN'S SHOES", "CARTERS", "WARBY PARKER"
+- Online: "AMAZON.CA", "AMAZON.COM", "AMZN", "SHOPIFY", "ETSY", "DEPOP", "VINTED", "POSHMARK"
+- Electronics: "BEST BUY", "APPLE STORE", "MICROSOFT STORE"
+- Home: "HOME DEPOT", "IKEA", "POTTERY BARN", "WEST ELM", "CRATE AND BARREL"
+- Department: "CANADIAN TIRE", "STAPLES", "TARGET", "WALMART" (not grocery)
+- Fashion: "H&M", "ZARA", "WINNERS", "MARSHALLS", "NIKE", "ADIDAS", "LULULEMON", "ATHLETA", "UNDER ARMOUR"
+- Fast Fashion: "SHEIN", "FASHION NOVA", "FOREVER 21", "UNIQLO"
+- Beauty: "SEPHORA", "ULTA", "BEAUTY COUNTER", "MAKEUP"
+- Accessories: "ALCANSIDE" (phone cases), "AMERICAN EAGLE", "BROWN'S SHOES", "CARTERS", "WARBY PARKER"
+- Other: "TEMU.COM", "TEMU"
 - General retail stores
 
 STEP 9: OTHER (everything else):
@@ -1207,6 +1252,8 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
             'DUBAI', 'ABU DHABI', 'ABUDHABI', 'TALABAT', 'QLUB',
             'CPAY-NOW-AED', 'TRYANO', 'AJMAL', 'ALMANDOOS',
             'ARABIAN HOUSE', 'ADNOC', 'FIVE HOTEL',
+            'AURA SKYPOOL', 'PULL AND BEAR', 'SUPERCARE PHARMACY',
+            'GEANT', 'ZARA ABU DHABI',
             # USA locations (for Amex which has no country code)
             'MIAMI', 'MIAMI BEACH', 'FORT LAUDERDA', 'WILTON MANORS',
             'NAPLES FL', 'TST* SHANE', 'CHELSEA HOTEL',
@@ -1222,6 +1269,7 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
             'ALAJUELA', 'BUDGET RENT A CAR',
             # Europe
             'SOLIHULL', 'AMSTERDAM', 'GIBRALTAR', 'PULLACH', 'DUBLIN',
+            'CARROLLS IRISH GIFTS', 'VIVA*OCTOPUSSYS', 'WORKMANS DUBLIN',
             # Amazon Dubai
             'AMAZON (MARKET PLACE-EC',
         ]
