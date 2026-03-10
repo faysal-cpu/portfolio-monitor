@@ -643,7 +643,7 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     bills_keywords = [
         'ROGERS', 'BELL CANADA', 'TELUS', 'FIDO', 'KOODO', 'ENBRIDGE',
         'TORONTO HYDRO', 'HYDRO ONE', 'MEMBERSHIP FEE', 'ANNUAL FEE',
-        'INSTALLMENT', 'INSURANCE', 'COOPERATORS', 'DUUO'
+        'INSTALLMENT', 'INSURANCE', 'COOPERATORS', 'DUUO', 'AFFIRM'
     ]
     for keyword in bills_keywords:
         if keyword in text:
@@ -877,6 +877,7 @@ STEP 4: CHECK FOR BILLS & UTILITIES (if merchant contains ANY of these keywords 
 - "ENBRIDGE", "TORONTO HYDRO", "HYDRO ONE"
 - "MEMBERSHIP FEE", "ANNUAL FEE", "INSTALLMENT"
 - "INSURANCE", "COOPERATORS", "DUUO"
+- "AFFIRM" (buy now pay later financing)
 - Credit card fees with "FEE" in name
 
 STEP 5: CHECK FOR HEALTH (if merchant contains ANY of these keywords → Health):
