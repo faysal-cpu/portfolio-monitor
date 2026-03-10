@@ -654,7 +654,8 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
         health_keywords = [
             'PHARMACY', 'PHARMA', 'SHOPPERS DRUG MART', 'REXALL', 'ORTHODONTIC',
             'ORTHO', 'DENTAL', 'DENTIST', 'MEDICAL', 'CLINIC', 'HOSPITAL',
-            'DR ', 'DOCTOR', 'OPTOMETRY', 'VISION CARE', 'EYE CARE'
+            'DR ', 'DOCTOR', 'OPTOMETRY', 'VISION CARE', 'EYE CARE',
+            'MASSAGE', 'STEP UP', 'EPPIX'
         ]
         for keyword in health_keywords:
             if keyword in text:
@@ -882,6 +883,8 @@ STEP 5: CHECK FOR HEALTH (if merchant contains ANY of these keywords → Health)
 - "ORTHODONTIC", "ORTHO", "DENTAL", "DENTIST"
 - "MEDICAL", "CLINIC", "HOSPITAL", "DR ", "DOCTOR"
 - "OPTOMETRY", "VISION CARE", "EYE CARE"
+- "MASSAGE", "STEP UP" (massage therapy)
+- "EPPIX" (medication)
 - IMPORTANT: If "VET" or "VETERINARY" or "ANIMAL" → Other (NOT Health)
 
 STEP 6: CHECK FOR ENTERTAINMENT (if merchant contains ANY of these keywords → Entertainment):
