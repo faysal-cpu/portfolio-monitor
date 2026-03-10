@@ -1435,9 +1435,10 @@ def detect_pattern_subscriptions(year: int, month: int, current_month_txs: List[
 
 def generate_html_report(year: int, month: int, transactions: List[Transaction],
                          data_quality: Dict[str, Any] = None) -> str:
-    """Generate clean single-column responsive HTML report"""
+    """Generate email-compatible HTML report using only tables and inline styles"""
 
     total_spent = sum(tx.amount for tx in transactions if tx.amount > 0)
+    transaction_count = len(transactions)
 
     # Category totals: only include positive amounts (spending), exclude refunds/cashback
     category_totals = defaultdict(float)
@@ -1501,813 +1502,609 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         ytd_total += total_spent
 
     month_name = datetime(year, month, 1).strftime('%B %Y').upper()
-    month_only = datetime(year, month, 1).strftime('%B').upper()
 
     # Category color mapping - premium palette
     category_colors = {
-        'Groceries': '#4CAF50',         # green
-        'Food & Dining': '#FF6B35',     # coral
-        'Transport': '#4A90E2',         # sky blue
-        'Travel': '#1ABC9C',            # turquoise
-        'Health': '#50C878',            # emerald
-        'Shopping': '#9B59B6',          # purple
-        'Entertainment': '#FF69B4',     # hot pink
-        'Bills & Utilities': '#F39C12', # amber
-        'Other': '#95A5A6'              # slate grey
+        'Groceries': '#4CAF50',
+        'Food & Dining': '#FF6B35',
+        'Transport': '#4A90E2',
+        'Travel': '#1ABC9C',
+        'Health': '#50C878',
+        'Shopping': '#9B59B6',
+        'Entertainment': '#FF69B4',
+        'Bills & Utilities': '#F39C12',
+        'Other': '#95A5A6'
     }
 
-    html = f"""<!DOCTYPE html>
-<html>
+    # Start building HTML with table-based layout
+    html = f"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light dark">
-    <meta name="supported-color-schemes" content="light dark">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Spending Report - {month_name}</title>
-    <style>
-        /* Reset and base styles */
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f0 100%);
-            color: #2d3748;
-            padding: 0;
-            margin: 0;
-            line-height: 1.6;
-            font-size: 15px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }}
-
-        .email-wrapper {{
-            background: transparent;
-            padding: 48px 20px;
-        }}
-
-        .container {{
-            max-width: 640px;
-            margin: 0 auto;
-            background: #ffffff;
-            border-radius: 16px;
-            overflow: visible;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08), 0 8px 20px rgba(0, 0, 0, 0.04);
-        }}
-
-        .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 48px 40px;
-            text-align: center;
-            color: #ffffff;
-            position: relative;
-            border-radius: 16px 16px 0 0;
-        }}
-
-        .header::after {{
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0) 100%);
-        }}
-
-        .header-title {{
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            color: rgba(255,255,255,0.85);
-            margin-bottom: 16px;
-        }}
-
-        .header-amount {{
-            font-size: 56px;
-            font-weight: 800;
-            letter-spacing: -2px;
-            color: #ffffff;
-            margin-bottom: 8px;
-            line-height: 1;
-        }}
-
-        .header-subtitle {{
-            font-size: 13px;
-            color: rgba(255,255,255,0.9);
-            font-weight: 500;
-        }}
-
-        .content {{
-            padding: 40px;
-        }}
-
-        .stats-grid {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 40px;
-        }}
-
-        .stat-card {{
-            background: linear-gradient(135deg, #f8fafb 0%, #f1f3f5 100%);
-            border: 1px solid #e9ecef;
-            border-radius: 12px;
-            padding: 24px;
-            text-align: center;
-            transition: all 0.3s ease;
-        }}
-
-        .stat-card:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
-        }}
-
-        .stat-label {{
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #6c757d;
-            margin-bottom: 12px;
-        }}
-
-        .stat-value {{
-            font-size: 26px;
-            font-weight: 800;
-            color: #2d3748;
-            line-height: 1;
-        }}
-
-        .section-header {{
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            color: #6c757d;
-            margin-bottom: 24px;
-            margin-top: 48px;
-        }}
-
-        .category-item {{
-            background: #ffffff;
-            border: 1px solid #e9ecef;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 16px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            overflow: hidden;
-        }}
-
-        .category-item::before {{
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 4px;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }}
-
-        .category-item:hover {{
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            transform: translateY(-2px);
-        }}
-
-        .category-item:hover::before {{
-            opacity: 1;
-        }}
-
-        .category-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }}
-
-        .category-name {{
-            font-size: 15px;
-            font-weight: 600;
-            color: #2d3748;
-            display: flex;
-            align-items: center;
-        }}
-
-        .category-indicator {{
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            margin-right: 12px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        }}
-
-        .category-amount {{
-            font-size: 20px;
-            font-weight: 800;
-            color: #2d3748;
-        }}
-
-        .category-meta {{
-            font-size: 12px;
-            color: #718096;
-            margin-bottom: 12px;
-        }}
-
-        .progress-bar {{
-            height: 6px;
-            background: #e9ecef;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-top: 12px;
-        }}
-
-        .progress-fill {{
-            height: 100%;
-            border-radius: 10px;
-            transition: width 0.6s ease;
-        }}
-
-        .merchant-list {{
-            background: #f8fafb;
-            border: 1px solid #e9ecef;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 40px;
-        }}
-
-        .merchant-item {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 16px;
-            background: #ffffff;
-            border-radius: 8px;
-            margin-bottom: 12px;
-            transition: all 0.2s ease;
-            border: 1px solid #f1f3f5;
-        }}
-
-        .merchant-item:last-child {{
-            margin-bottom: 0;
-        }}
-
-        .merchant-item:hover {{
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-            transform: translateX(4px);
-        }}
-
-        .merchant-rank {{
-            font-size: 11px;
-            font-weight: 800;
-            color: #9ca3af;
-            min-width: 28px;
-            background: #f1f3f5;
-            padding: 4px 8px;
-            border-radius: 6px;
-            text-align: center;
-        }}
-
-        .merchant-name {{
-            flex: 1;
-            font-size: 14px;
-            font-weight: 600;
-            color: #374151;
-            margin: 0 16px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }}
-
-        .merchant-count {{
-            font-size: 12px;
-            color: #6c757d;
-            margin-right: 12px;
-            padding: 4px 10px;
-            background: #f8f9fa;
-            border-radius: 6px;
-        }}
-
-        .merchant-amount {{
-            font-size: 15px;
-            font-weight: 800;
-            color: #2d3748;
-        }}
-
-        .subscription-card {{
-            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-            border: 1px solid #e9ecef;
-            border-radius: 12px;
-            padding: 28px;
-            margin-bottom: 40px;
-        }}
-
-        .subscription-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #e9ecef;
-        }}
-
-        .subscription-title {{
-            font-size: 15px;
-            font-weight: 700;
-            color: #2d3748;
-        }}
-
-        .subscription-total {{
-            font-size: 14px;
-            font-weight: 700;
-            color: #667eea;
-        }}
-
-        .subscription-item {{
-            background: #ffffff;
-            border: 1px solid #f1f3f5;
-            border-radius: 10px;
-            padding: 18px;
-            margin-bottom: 12px;
-            transition: all 0.2s ease;
-        }}
-
-        .subscription-item:hover {{
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-        }}
-
-        .footer {{
-            background: #f8fafb;
-            padding: 32px 40px;
-            text-align: center;
-            border-top: 1px solid #e9ecef;
-            border-radius: 0 0 16px 16px;
-        }}
-
-        .footer-text {{
-            font-size: 12px;
-            color: #6c757d;
-            line-height: 1.8;
-        }}
-
-        .footer-link {{
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
-        }}
-
-        /* Mobile responsiveness */
-        @media only screen and (max-width: 600px) {{
-            .email-wrapper {{
-                padding: 24px 16px;
-            }}
-
-            .container {{
-                border-radius: 12px;
-            }}
-
-            .header {{
-                padding: 32px 24px;
-            }}
-
-            .header-amount {{
-                font-size: 44px;
-            }}
-
-            .content {{
-                padding: 24px;
-            }}
-
-            .stats-grid {{
-                gap: 12px;
-            }}
-
-            .stat-card {{
-                padding: 16px;
-            }}
-
-            .category-item {{
-                padding: 16px;
-            }}
-
-            .merchant-list {{
-                padding: 16px;
-            }}
-
-            .merchant-item {{
-                padding: 12px;
-            }}
-
-            .footer {{
-                padding: 24px;
-            }}
-        }}
-
-        /* Dark mode support */
-        @media (prefers-color-scheme: dark) {{
-            body {{
-                background: #0a0a0f !important;
-                color: #e9ecef !important;
-            }}
-
-            .email-wrapper {{
-                background: #0a0a0f !important;
-            }}
-
-            .container {{
-                background: #1a1a1f !important;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important;
-            }}
-
-            .header {{
-                background: linear-gradient(135deg, #6B8DD6 0%, #8E9AAF 100%) !important;
-            }}
-
-            .header-title {{
-                color: #ffffff !important;
-                opacity: 1 !important;
-            }}
-
-            .header-amount {{
-                color: #ffffff !important;
-            }}
-
-            .header-subtitle {{
-                color: #ffffff !important;
-                opacity: 0.95 !important;
-            }}
-
-            .content {{
-                background: #1a1a1f !important;
-            }}
-
-            .stat-card {{
-                background: #2a2a2f !important;
-                color: #e9ecef !important;
-            }}
-
-            .stat-label {{
-                color: #9ca3af !important;
-            }}
-
-            .stat-value {{
-                color: #e9ecef !important;
-            }}
-
-            .section-header {{
-                color: #9ca3af !important;
-                border-bottom-color: #2a2a2f !important;
-            }}
-
-            .category-item {{
-                background: #2a2a2f !important;
-                border-color: #3a3a3f !important;
-            }}
-
-            .category-item:hover {{
-                border-color: #4a4a4f !important;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
-            }}
-
-            .category-name {{
-                color: #e9ecef !important;
-            }}
-
-            .category-meta {{
-                color: #9ca3af !important;
-            }}
-
-            .merchant-list {{
-                background: #2a2a2f !important;
-                border-color: #3a3a3f !important;
-            }}
-
-            .merchant-item {{
-                border-bottom-color: #3a3a3f !important;
-            }}
-
-            .merchant-rank {{
-                color: #6c757d !important;
-            }}
-
-            .merchant-name {{
-                color: #e9ecef !important;
-            }}
-
-            .merchant-count {{
-                color: #9ca3af !important;
-            }}
-
-            .merchant-amount {{
-                color: #e9ecef !important;
-            }}
-
-            .subscription-card {{
-                background: #2a2a2f !important;
-                border-color: #3a3a3f !important;
-            }}
-
-            .subscription-header {{
-                border-bottom-color: #3a3a3f !important;
-            }}
-
-            .subscription-title {{
-                color: #e9ecef !important;
-            }}
-
-            .subscription-total {{
-                color: #9ca3af !important;
-            }}
-
-            .subscription-item {{
-                background: #3a3a3f !important;
-            }}
-
-            .footer {{
-                background: #2a2a2f !important;
-                border-top-color: #3a3a3f !important;
-            }}
-
-            .footer-text {{
-                color: #9ca3af !important;
-            }}
-
-            /* Keep colored amounts visible in dark mode */
-            .category-amount {{
-                opacity: 0.95 !important;
-            }}
-
-            /* MoM comparison backgrounds in dark mode */
-            div[style*="background: #fef2f2"] {{
-                background: rgba(220, 53, 69, 0.15) !important;
-            }}
-
-            div[style*="background: #f0fdf4"] {{
-                background: rgba(40, 167, 69, 0.15) !important;
-            }}
-        }}
-
-        /* Mobile responsive */
-        @media only screen and (max-width: 600px) {{
-            .email-wrapper {{ padding: 20px 12px; }}
-            .header {{ padding: 32px 24px; }}
-            .content {{ padding: 24px 20px; }}
-            .header-amount {{ font-size: 40px; }}
-            .stats-grid {{ grid-template-columns: 1fr; }}
-        }}
-    </style>
 </head>
-<body>
-    <div class="email-wrapper">
-        <div class="container">
-            <!-- Header -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#667eea" style="background-color: #667eea !important;">
-                <tr>
-                    <td align="center" style="padding: 40px 32px; background-color: #667eea !important;">
-                        <div style="font-size: 14px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #ffffff !important; margin-bottom: 12px;">{month_name}</div>
-                        <div style="font-size: 48px; font-weight: 700; letter-spacing: -1px; color: #ffffff !important; line-height: 1.1; margin-bottom: 8px;">${total_spent:,.2f}</div>
-                        <div style="font-size: 15px; color: #ffffff !important;">Total Spending</div>
-                    </td>
-                </tr>
-            </table>
+<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f4;">
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f4f4f4;">
+        <tr>
+            <td align="center" style="padding: 40px 20px;">
 
-            <!-- Content -->
-            <div class="content">
-                <!-- Summary Stats -->
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">Year to Date</div>
-                        <div class="stat-value">${ytd_total:,.2f}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Transactions</div>
-                        <div class="stat-value">{len(transactions)}</div>
-                    </div>
-                </div>"""
+                <!-- Main Container -->
+                <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff;">
+
+                    <!-- Header -->
+                    <tr>
+                        <td align="center" style="background-color: #667eea; padding: 40px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td align="center" style="font-size: 11px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; color: #ffffff; padding-bottom: 15px;">
+                                        {month_name}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td align="center" style="font-size: 48px; font-weight: bold; color: #ffffff; padding-bottom: 10px; line-height: 1;">
+                                        ${total_spent:,.2f}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td align="center" style="font-size: 13px; color: #ffffff;">
+                                        Total Spending
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Stats Grid -->
+                    <tr>
+                        <td style="padding: 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td width="48%" style="background-color: #f8f9fa; padding: 20px;" align="center">
+                                        <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td align="center" style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #6c757d; padding-bottom: 10px;">
+                                                    YEAR TO DATE
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 24px; font-weight: bold; color: #2d3748;">
+                                                    ${ytd_total:,.2f}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td width="4%"></td>
+                                    <td width="48%" style="background-color: #f8f9fa; padding: 20px;" align="center">
+                                        <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td align="center" style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #6c757d; padding-bottom: 10px;">
+                                                    TRANSACTIONS
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 24px; font-weight: bold; color: #2d3748;">
+                                                    {transaction_count}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     # Add MoM comparison if available
     if mom_change is not None:
-        mom_color = "#dc3545" if mom_change > 0 else "#28a745"
-        mom_arrow = "↑" if mom_change > 0 else "↓"
-        mom_label = "more than" if mom_change > 0 else "less than"
+        mom_bg_color = "#fef2f2" if mom_change > 0 else "#f0fdf4"
+        mom_border_color = "#dc3545" if mom_change > 0 else "#28a745"
+        mom_text_color = "#dc3545" if mom_change > 0 else "#28a745"
+        mom_arrow = "&#8593;" if mom_change > 0 else "&#8595;"
+        mom_label = "more than last month" if mom_change > 0 else "less than last month"
 
         html += f"""
-                <!-- Month over Month -->
-                <div style="background: {'#fef2f2' if mom_change > 0 else '#f0fdf4'}; border-left: 4px solid {mom_color}; border-radius: 10px; padding: 20px; margin-bottom: 32px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 4px;">vs Last Month</div>
-                            <div style="font-size: 16px; font-weight: 600; color: #1a1d1f;">
-                                {mom_arrow} ${abs(mom_change):,.2f} {mom_label} last month
-                            </div>
-                        </div>
-                        <div style="font-size: 24px; font-weight: 700; color: {mom_color};">
-                            {mom_percent:+.1f}%
-                        </div>
-                    </div>
-                </div>"""
+                    <!-- Month over Month -->
+                    <tr>
+                        <td style="padding: 0 30px 30px 30px;">
+                            <table border="0" cellpadding="20" cellspacing="0" width="100%" style="background-color: {mom_bg_color}; border-left: 4px solid {mom_border_color};">
+                                <tr>
+                                    <td width="70%" style="vertical-align: middle;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="font-size: 13px; font-weight: bold; color: #495057; padding-bottom: 4px;">
+                                                    vs Last Month
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="font-size: 16px; font-weight: bold; color: #1a1d1f;">
+                                                    {mom_arrow} ${abs(mom_change):,.2f} {mom_label}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td width="30%" align="right" style="vertical-align: middle; font-size: 24px; font-weight: bold; color: {mom_text_color};">
+                                        {mom_percent:+.1f}%
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     # Categories section
     html += """
-                <div class="section-header">SPENDING BY CATEGORY</div>"""
+                    <!-- Spending by Category -->
+                    <tr>
+                        <td style="padding: 0 30px 20px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #6c757d; padding-bottom: 20px; border-bottom: 2px solid #e9ecef;">
+                                        SPENDING BY CATEGORY
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     for category, amount in sorted_categories:
         percentage = (amount / total_spent * 100) if total_spent > 0 else 0
-        border_color = category_colors.get(category, '#95A5A6')
+        color = category_colors.get(category, '#95A5A6')
+        bar_width = int(percentage)
 
         html += f"""
-                <div class="category-item" style="border-left-color: {border_color};">
-                    <div class="category-header">
-                        <div class="category-name">
-                            <div class="category-indicator" style="background: {border_color};"></div>
-                            {category}
-                        </div>
-                        <div class="category-amount" style="color: {border_color};">${amount:,.2f}</div>
-                    </div>
-                    <div class="category-meta">{percentage:.1f}% of total spending</div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: {percentage}%; background: linear-gradient(90deg, {border_color}, {border_color}dd);"></div>
-                    </div>
-                </div>"""
+                    <tr>
+                        <td style="padding: 0 30px 20px 30px;">
+                            <table border="0" cellpadding="12" cellspacing="0" width="100%" style="background-color: #f8f9fa; border-left: 4px solid {color};">
+                                <tr>
+                                    <td width="60%" style="vertical-align: top;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="font-size: 15px; font-weight: bold; color: #2d3748; padding-bottom: 6px;">
+                                                    {category}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="font-size: 12px; color: #718096;">
+                                                    {percentage:.1f}% of total spending
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td width="40%" align="right" style="vertical-align: top; font-size: 20px; font-weight: bold; color: {color};">
+                                        ${amount:,.2f}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" style="padding-top: 8px;">
+                                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #e9ecef; height: 6px;">
+                                            <tr>
+                                                <td width="{bar_width}%" style="background-color: {color}; height: 6px;"></td>
+                                                <td></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     # Subscriptions section
     if subscriptions:
         html += f"""
-                <div class="section-header" style="margin-top: 40px;">RECURRING SUBSCRIPTIONS</div>
-                <div class="subscription-card">
-                    <div class="subscription-header">
-                        <div class="subscription-title">{len(subscriptions)} Active Subscriptions</div>
-                        <div class="subscription-total">${subscription_total:,.2f}/month</div>
-                    </div>"""
+                    <!-- Subscriptions -->
+                    <tr>
+                        <td style="padding: 20px 30px 20px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #6c757d; padding-bottom: 20px; border-bottom: 2px solid #e9ecef;">
+                                        RECURRING SUBSCRIPTIONS
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 30px 20px 30px;">
+                            <table border="0" cellpadding="20" cellspacing="0" width="100%" style="background-color: #f8f9fa;">
+                                <tr>
+                                    <td width="70%" style="font-size: 15px; font-weight: bold; color: #2d3748;">
+                                        {len(subscriptions)} Active Subscriptions
+                                    </td>
+                                    <td width="30%" align="right" style="font-size: 14px; font-weight: bold; color: #667eea;">
+                                        ${subscription_total:,.2f}/month
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
-        for idx, sub in enumerate(subscriptions, 1):
+        for sub in subscriptions:
             monthly_amt = sub['avg_amount']
             annual_amt = sub['annual_cost']
             merchant = clean_merchant_for_display(sub['merchant'])
 
             html += f"""
-                    <div class="subscription-item">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                            <div style="flex: 1;">
-                                <div style="font-size: 15px; font-weight: 600; color: #1a1d1f; margin-bottom: 4px;">{merchant}</div>
-                                <div style="font-size: 13px; color: #495057;">{sub['occurrences']} charges detected</div>
-                            </div>
-                            <div style="text-align: right;">
-                                <div style="font-size: 18px; font-weight: 700; color: #1a1d1f;">${monthly_amt:,.2f}</div>
-                                <div style="font-size: 12px; color: #495057;">${annual_amt:,.2f}/year</div>
-                            </div>
-                        </div>
-                    </div>"""
-
-        html += """
-                </div>"""
+                    <tr>
+                        <td style="padding: 0 30px 12px 30px;">
+                            <table border="0" cellpadding="12" cellspacing="0" width="100%" style="background-color: #ffffff; border: 1px solid #e9ecef;">
+                                <tr>
+                                    <td width="60%" style="vertical-align: top;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="font-size: 15px; font-weight: bold; color: #1a1d1f; padding-bottom: 4px;">
+                                                    {merchant}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="font-size: 13px; color: #495057;">
+                                                    {sub['occurrences']} charges detected
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td width="40%" align="right" style="vertical-align: top;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td align="right" style="font-size: 18px; font-weight: bold; color: #1a1d1f; padding-bottom: 4px;">
+                                                    ${monthly_amt:,.2f}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="right" style="font-size: 12px; color: #495057;">
+                                                    ${annual_amt:,.2f}/year
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     # Returns & Refunds section
     if insights['total_refunds'] > 0:
         html += f"""
-                <div class="section-header" style="margin-top: 40px;">RETURNS & REFUNDS</div>
-                <div class="card" style="background: rgba(16, 185, 129, 0.08); border-color: #10b981;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <div style="font-size: 15px; font-weight: 600; color: #1a1d1f;">Total Refunded</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #10b981;">${insights['total_refunds']:,.2f}</div>
-                    </div>"""
+                    <!-- Refunds -->
+                    <tr>
+                        <td style="padding: 20px 30px 20px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #6c757d; padding-bottom: 20px; border-bottom: 2px solid #e9ecef;">
+                                        RETURNS &amp; REFUNDS
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 30px 20px 30px;">
+                            <table border="0" cellpadding="20" cellspacing="0" width="100%" style="background-color: #f0fdf4; border-left: 4px solid #10b981;">
+                                <tr>
+                                    <td width="60%" style="font-size: 15px; font-weight: bold; color: #1a1d1f;">
+                                        Total Refunded
+                                    </td>
+                                    <td width="40%" align="right" style="font-size: 24px; font-weight: bold; color: #10b981;">
+                                        ${insights['total_refunds']:,.2f}
+                                    </td>
+                                </tr>"""
 
         if insights['refund_details']:
             html += """
-                    <div style="border-top: 1px solid rgba(16, 185, 129, 0.2); padding-top: 16px;">
-                        <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 12px;">Top Refunds</div>"""
+                                <tr>
+                                    <td colspan="2" style="padding-top: 16px; border-top: 1px solid #d1fae5;">
+                                        <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td colspan="2" style="font-size: 13px; font-weight: bold; color: #495057; padding-bottom: 12px;">
+                                                    Top Refunds
+                                                </td>
+                                            </tr>"""
 
             for refund in insights['refund_details']:
                 html += f"""
-                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(16, 185, 129, 0.1);">
-                            <div style="font-size: 14px; color: #1a1d1f;">{refund['merchant']}</div>
-                            <div style="font-size: 14px; font-weight: 600; color: #10b981;">${refund['amount']:,.2f}</div>
-                        </div>"""
+                                            <tr>
+                                                <td width="70%" style="font-size: 14px; color: #1a1d1f; padding: 8px 0; border-bottom: 1px solid #d1fae5;">
+                                                    {refund['merchant']}
+                                                </td>
+                                                <td width="30%" align="right" style="font-size: 14px; font-weight: bold; color: #10b981; padding: 8px 0; border-bottom: 1px solid #d1fae5;">
+                                                    ${refund['amount']:,.2f}
+                                                </td>
+                                            </tr>"""
 
             html += """
-                    </div>"""
+                                        </table>
+                                    </td>
+                                </tr>"""
 
         html += """
-                </div>"""
+                            </table>
+                        </td>
+                    </tr>"""
 
     # Foreign Spending section
     if insights['foreign_count'] > 0:
         html += f"""
-                <div class="section-header" style="margin-top: 40px;">FOREIGN SPENDING</div>
-                <div class="card" style="background: rgba(99, 102, 241, 0.08); border-color: #6366f1;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <div style="font-size: 15px; font-weight: 600; color: #1a1d1f;">International Transactions</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #6366f1;">${insights['foreign_total']:,.2f}</div>
-                    </div>
-                    <div style="font-size: 13px; color: #495057;">{insights['foreign_count']} foreign transactions detected</div>
-                </div>"""
+                    <!-- Foreign Spending -->
+                    <tr>
+                        <td style="padding: 20px 30px 20px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #6c757d; padding-bottom: 20px; border-bottom: 2px solid #e9ecef;">
+                                        FOREIGN SPENDING
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 30px 20px 30px;">
+                            <table border="0" cellpadding="20" cellspacing="0" width="100%" style="background-color: #eef2ff; border-left: 4px solid #6366f1;">
+                                <tr>
+                                    <td width="60%" style="vertical-align: top;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="font-size: 15px; font-weight: bold; color: #1a1d1f; padding-bottom: 6px;">
+                                                    International Transactions
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="font-size: 13px; color: #495057;">
+                                                    {insights['foreign_count']} foreign transactions detected
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td width="40%" align="right" style="vertical-align: top; font-size: 24px; font-weight: bold; color: #6366f1;">
+                                        ${insights['foreign_total']:,.2f}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
-    # Spending Velocity section
+    # Spending Patterns section
     html += f"""
-                <div class="section-header" style="margin-top: 40px;">SPENDING PATTERNS</div>
-                <div class="card">
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 24px;">
-                        <div>
-                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 8px;">Average Per Day</div>
-                            <div style="font-size: 28px; font-weight: 700; color: #1a1d1f;">${insights['avg_per_day']:,.2f}</div>
-                        </div>"""
+                    <!-- Spending Patterns -->
+                    <tr>
+                        <td style="padding: 20px 30px 20px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #6c757d; padding-bottom: 20px; border-bottom: 2px solid #e9ecef;">
+                                        SPENDING PATTERNS
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 30px 20px 30px;">
+                            <table border="0" cellpadding="20" cellspacing="0" width="100%" style="background-color: #f8f9fa;">
+                                <tr>
+                                    <td width="33%" align="center" style="vertical-align: top;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td align="center" style="font-size: 13px; font-weight: bold; color: #495057; padding-bottom: 8px;">
+                                                    Average Per Day
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 28px; font-weight: bold; color: #1a1d1f;">
+                                                    ${insights['avg_per_day']:,.2f}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>"""
 
     if insights['highest_day'][0]:
         html += f"""
-                        <div>
-                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 8px;">Highest Day</div>
-                            <div style="font-size: 28px; font-weight: 700; color: #ef4444;">${insights['highest_day'][1]:,.2f}</div>
-                            <div style="font-size: 12px; color: #495057; margin-top: 4px;">{insights['highest_day'][0].strftime('%b %d')}</div>
-                        </div>"""
+                                    <td width="33%" align="center" style="vertical-align: top;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td align="center" style="font-size: 13px; font-weight: bold; color: #495057; padding-bottom: 8px;">
+                                                    Highest Day
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 28px; font-weight: bold; color: #ef4444;">
+                                                    ${insights['highest_day'][1]:,.2f}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 12px; color: #495057; padding-top: 4px;">
+                                                    {insights['highest_day'][0].strftime('%b %d')}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>"""
 
     html += f"""
-                        <div>
-                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 8px;">Weekend Spending</div>
-                            <div style="font-size: 28px; font-weight: 700; color: #667eea;">{insights['weekend_pct']:.1f}%</div>
-                            <div style="font-size: 12px; color: #495057; margin-top: 4px;">of total</div>
-                        </div>
-                    </div>
-                </div>"""
+                                    <td width="33%" align="center" style="vertical-align: top;">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td align="center" style="font-size: 13px; font-weight: bold; color: #495057; padding-bottom: 8px;">
+                                                    Weekend Spending
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 28px; font-weight: bold; color: #667eea;">
+                                                    {insights['weekend_pct']:.1f}%
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 12px; color: #495057; padding-top: 4px;">
+                                                    of total
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
-    # Most Frequent Merchants section
+    # Most Visited Merchants section
     if insights['top_by_visits']:
         html += """
-                <div class="section-header" style="margin-top: 40px;">MOST VISITED MERCHANTS</div>
-                <div class="merchant-list">"""
+                    <!-- Most Visited Merchants -->
+                    <tr>
+                        <td style="padding: 20px 30px 20px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #6c757d; padding-bottom: 20px; border-bottom: 2px solid #e9ecef;">
+                                        MOST VISITED MERCHANTS
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
         for idx, (merchant, data) in enumerate(insights['top_by_visits'], 1):
             html += f"""
-                    <div class="merchant-item">
-                        <div class="merchant-rank">#{idx}</div>
-                        <div class="merchant-name">{merchant}</div>
-                        <div class="merchant-count">{data['count']} visits</div>
-                        <div class="merchant-amount">${data['amount']:,.2f}</div>
-                    </div>"""
-
-        html += """
-                </div>"""
+                    <tr>
+                        <td style="padding: 0 30px 8px 30px;">
+                            <table border="0" cellpadding="12" cellspacing="0" width="100%" style="background-color: #ffffff; border: 1px solid #e9ecef;">
+                                <tr>
+                                    <td width="8%" style="font-size: 11px; font-weight: bold; color: #9ca3af; background-color: #f8f9fa;">
+                                        #{idx}
+                                    </td>
+                                    <td width="42%" style="font-size: 14px; font-weight: bold; color: #374151;">
+                                        {merchant}
+                                    </td>
+                                    <td width="25%" style="font-size: 12px; color: #6c757d; background-color: #f8f9fa;">
+                                        {data['count']} visits
+                                    </td>
+                                    <td width="25%" align="right" style="font-size: 15px; font-weight: bold; color: #2d3748;">
+                                        ${data['amount']:,.2f}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     # Top Merchants by Amount section
     html += """
-                <div class="section-header" style="margin-top: 40px;">TOP MERCHANTS BY AMOUNT</div>
-                <div class="merchant-list">"""
+                    <!-- Top Merchants -->
+                    <tr>
+                        <td style="padding: 20px 30px 20px 30px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #6c757d; padding-bottom: 20px; border-bottom: 2px solid #e9ecef;">
+                                        TOP MERCHANTS BY AMOUNT
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     for idx, (merchant, data) in enumerate(top_merchants, 1):
         html += f"""
-                    <div class="merchant-item">
-                        <div class="merchant-rank">#{idx}</div>
-                        <div class="merchant-name">{merchant}</div>
-                        <div class="merchant-count">{data['count']} txns</div>
-                        <div class="merchant-amount">${data['amount']:,.2f}</div>
-                    </div>"""
+                    <tr>
+                        <td style="padding: 0 30px 8px 30px;">
+                            <table border="0" cellpadding="12" cellspacing="0" width="100%" style="background-color: #ffffff; border: 1px solid #e9ecef;">
+                                <tr>
+                                    <td width="8%" style="font-size: 11px; font-weight: bold; color: #9ca3af; background-color: #f8f9fa;">
+                                        #{idx}
+                                    </td>
+                                    <td width="42%" style="font-size: 14px; font-weight: bold; color: #374151;">
+                                        {merchant}
+                                    </td>
+                                    <td width="25%" style="font-size: 12px; color: #6c757d; background-color: #f8f9fa;">
+                                        {data['count']} txns
+                                    </td>
+                                    <td width="25%" align="right" style="font-size: 15px; font-weight: bold; color: #2d3748;">
+                                        ${data['amount']:,.2f}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
-    html += """
-                </div>"""
-
-    # Month-over-month comparison
-    if mom_change is not None:
+    # Month-over-month detailed comparison
+    if mom_change is not None and biggest_change_category:
         mom_color = "#ef4444" if mom_change > 0 else "#10b981"
-        mom_arrow = "↑" if mom_change > 0 else "↓"
-        mom_bg = "rgba(239, 68, 68, 0.1)" if mom_change > 0 else "rgba(16, 185, 129, 0.1)"
+        mom_bg = "#fef2f2" if mom_change > 0 else "#f0fdf4"
+        mom_arrow = "&#8593;" if mom_change > 0 else "&#8595;"
         mom_label = "More than last month" if mom_change > 0 else "Less than last month"
 
+        change_color = "#ef4444" if biggest_change_amount > 0 else "#10b981"
+        change_arrow = "&#8593;" if biggest_change_amount > 0 else "&#8595;"
+
         html += f"""
-        <div class="card" style="background: {mom_bg}; border-color: {mom_color}; text-align: center; padding: 28px 20px;">
-            <div class="text-secondary" style="font-size: 13px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #495057; margin-bottom: 12px;">Month over Month</div>
-            <div class="text-colored" style="font-size: 42px; font-weight: 700; color: {mom_color}; line-height: 1; margin-bottom: 8px;">
-                {mom_arrow} ${abs(mom_change):,.2f}
-            </div>
-            <div class="badge-colored" style="display: inline-block; background: {mom_color}; color: #ffffff; padding: 6px 14px; border-radius: 16px; font-size: 14px; font-weight: 600; margin-top: 8px;">
-                {mom_percent:+.1f}% · {mom_label}
-            </div>"""
-
-        # Add category breakdown if available
-        if biggest_change_category:
-            change_arrow = "↑" if biggest_change_amount > 0 else "↓"
-            change_color = "#ef4444" if biggest_change_amount > 0 else "#10b981"
-            html += f"""
-            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(0, 0, 0, 0.1);">
-                <div style="font-size: 13px; color: #495057; margin-bottom: 8px;">Biggest Change</div>
-                <div style="font-size: 16px; font-weight: 600; color: #1a1d1f; margin-bottom: 4px;">{biggest_change_category}</div>
-                <div style="font-size: 18px; font-weight: 700; color: {change_color};">
-                    {change_arrow} ${abs(biggest_change_amount):,.2f} <span style="font-size: 14px; font-weight: 600;">({biggest_change_percent:+.1f}%)</span>
-                </div>
-            </div>"""
-
-        html += """
-        </div>"""
+                    <!-- MoM Detailed -->
+                    <tr>
+                        <td style="padding: 20px 30px 20px 30px;">
+                            <table border="0" cellpadding="28" cellspacing="0" width="100%" style="background-color: {mom_bg}; border-left: 4px solid {mom_color};">
+                                <tr>
+                                    <td align="center">
+                                        <table border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td align="center" style="font-size: 13px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: #495057; padding-bottom: 12px;">
+                                                    Month over Month
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="font-size: 42px; font-weight: bold; color: {mom_color}; line-height: 1; padding-bottom: 8px;">
+                                                    {mom_arrow} ${abs(mom_change):,.2f}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="padding-top: 8px;">
+                                                    <table border="0" cellpadding="6" cellspacing="0" style="background-color: {mom_color};">
+                                                        <tr>
+                                                            <td style="font-size: 14px; font-weight: bold; color: #ffffff;">
+                                                                {mom_percent:+.1f}% &middot; {mom_label}
+                                                            </td>
+                                                        </tr>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td align="center" style="padding-top: 20px; border-top: 1px solid rgba(0, 0, 0, 0.1);">
+                                                    <table border="0" cellpadding="0" cellspacing="0">
+                                                        <tr>
+                                                            <td align="center" style="font-size: 13px; color: #495057; padding-bottom: 8px;">
+                                                                Biggest Change
+                                                            </td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td align="center" style="font-size: 16px; font-weight: bold; color: #1a1d1f; padding-bottom: 4px;">
+                                                                {biggest_change_category}
+                                                            </td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td align="center" style="font-size: 18px; font-weight: bold; color: {change_color};">
+                                                                {change_arrow} ${abs(biggest_change_amount):,.2f} <span style="font-size: 14px; font-weight: bold;">({biggest_change_percent:+.1f}%)</span>
+                                                            </td>
+                                                        </tr>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
 
     # Footer
     html += f"""
-            <!-- Footer -->
-            <div class="footer">
-                <div class="footer-text">
-                    Generated on {datetime.now().strftime('%B %d, %Y')} • Powered by Claude AI
-                </div>
-            </div>
-        </div>
-        </div>
-    </div>
+                    <!-- Footer -->
+                    <tr>
+                        <td align="center" style="background-color: #f8f9fa; padding: 32px; border-top: 1px solid #e9ecef;">
+                            <table border="0" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td align="center" style="font-size: 12px; color: #6c757d; line-height: 1.8;">
+                                        Generated on {datetime.now().strftime('%B %d, %Y')} &bull; Powered by Claude AI
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                </table>
+                <!-- End Main Container -->
+
+            </td>
+        </tr>
+    </table>
 </body>
 </html>"""
 
