@@ -1292,8 +1292,16 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
     subscriptions = []
 
     for normalized_merchant, txs in merchant_groups.items():
+        # Debug logging for Spotify
+        if 'SPOTIFY' in normalized_merchant.upper():
+            logger.info(f"DEBUG: Found Spotify merchant: {normalized_merchant}, {len(txs)} transactions")
+            for tx in txs:
+                logger.info(f"  - {tx['date'].date()}: ${tx['amount']:.2f}")
+
         # Require 3+ occurrences to reduce false positives
         if len(txs) < 3:
+            if 'SPOTIFY' in normalized_merchant.upper():
+                logger.info(f"DEBUG: Spotify skipped - only {len(txs)} transactions (need 3+)")
             continue
 
         # Skip payment/cashback/refunds (ENHANCED filtering)
@@ -1324,6 +1332,8 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
 
         # If variation is too large, skip (not a subscription)
         if amount_range > max_variation:
+            if 'SPOTIFY' in normalized_merchant.upper():
+                logger.info(f"DEBUG: Spotify skipped - amount variation ${amount_range:.2f} > ${max_variation:.2f}")
             continue
 
         # Check if intervals are 27-36 days (approximately monthly)
@@ -1331,6 +1341,9 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
         for i in range(1, len(txs_sorted)):
             days_diff = (txs_sorted[i]['date'] - txs_sorted[i-1]['date']).days
             intervals.append(days_diff)
+
+        if 'SPOTIFY' in normalized_merchant.upper():
+            logger.info(f"DEBUG: Spotify intervals: {intervals}")
 
         # Check if intervals are monthly (27-36 days, expanded for February edge cases)
         if intervals and all(27 <= interval <= 36 for interval in intervals):
@@ -1341,6 +1354,12 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
                 'occurrences': len(txs_sorted),
                 'annual_cost': avg_amount * 12
             })
+            if 'SPOTIFY' in normalized_merchant.upper():
+                logger.info(f"DEBUG: ✓ Spotify DETECTED as subscription!")
+        else:
+            if 'SPOTIFY' in normalized_merchant.upper():
+                bad_intervals = [i for i in intervals if not (27 <= i <= 36)]
+                logger.info(f"DEBUG: Spotify skipped - intervals out of range: {bad_intervals}")
 
     # Sort by average amount descending
     subscriptions.sort(key=lambda x: x['avg_amount'], reverse=True)
