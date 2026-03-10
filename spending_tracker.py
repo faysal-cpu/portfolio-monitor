@@ -685,7 +685,8 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     # STEP 8: SHOPPING
     shopping_keywords = [
         'AMAZON.CA', 'AMAZON.COM', 'AMZN', 'BEST BUY', 'STAPLES', 'HOME DEPOT',
-        'CANADIAN TIRE', 'H&M', 'ZARA', 'WINNERS', 'MARSHALLS', 'TARGET'
+        'CANADIAN TIRE', 'H&M', 'ZARA', 'WINNERS', 'MARSHALLS', 'TARGET',
+        'ALCANSIDE'
     ]
     for keyword in shopping_keywords:
         if keyword in text:
@@ -905,6 +906,7 @@ STEP 8: CHECK FOR SHOPPING (retail, Amazon, general stores):
 - "BEST BUY", "STAPLES", "HOME DEPOT", "CANADIAN TIRE"
 - "H&M", "ZARA", "WINNERS", "MARSHALLS"
 - "TARGET", "WALMART" (not grocery)
+- "ALCANSIDE" (phone cases)
 - General retail stores
 
 STEP 9: OTHER (everything else):
@@ -1210,8 +1212,6 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
             'ALAJUELA', 'BUDGET RENT A CAR',
             # Europe
             'SOLIHULL',
-            # Netherlands
-            'BERGHEM', 'SP ALCANSIDE',
             # Amazon Dubai
             'AMAZON (MARKET PLACE-EC',
         ]
