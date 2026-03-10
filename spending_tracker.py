@@ -1463,261 +1463,378 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 
         body {{
-            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-            background: #f8f9fa;
-            color: #1a1d1f;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f0 100%);
+            color: #2d3748;
             padding: 0;
             margin: 0;
-            line-height: 1.5;
+            line-height: 1.6;
             font-size: 15px;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
         }}
 
         .email-wrapper {{
-            background: #f8f9fa;
-            padding: 40px 20px;
+            background: transparent;
+            padding: 48px 20px;
         }}
 
         .container {{
-            max-width: 600px;
+            max-width: 640px;
             margin: 0 auto;
             background: #ffffff;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 10px 15px rgba(0, 0, 0, 0.03);
-            word-wrap: break-word;
-            overflow-wrap: break-word;
+            border-radius: 16px;
+            overflow: visible;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08), 0 8px 20px rgba(0, 0, 0, 0.04);
         }}
 
         .header {{
-            background: linear-gradient(135deg, #6B8DD6 0%, #8E9AAF 100%);
-            padding: 36px 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 48px 40px;
             text-align: center;
             color: #ffffff;
+            position: relative;
+            border-radius: 16px 16px 0 0;
+        }}
+
+        .header::after {{
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0) 100%);
         }}
 
         .header-title {{
-            font-size: 13px;
-            font-weight: 600;
-            letter-spacing: 1.2px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 2px;
             text-transform: uppercase;
-            color: #ffffff !important;
-            opacity: 0.9;
-            margin-bottom: 12px;
+            color: rgba(255,255,255,0.85);
+            margin-bottom: 16px;
         }}
 
         .header-amount {{
-            font-size: 38px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            color: #ffffff !important;
+            font-size: 56px;
+            font-weight: 800;
+            letter-spacing: -2px;
+            color: #ffffff;
             margin-bottom: 8px;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
+            line-height: 1;
         }}
 
         .header-subtitle {{
-            font-size: 14px;
-            color: #ffffff !important;
-            opacity: 0.9;
+            font-size: 13px;
+            color: rgba(255,255,255,0.9);
+            font-weight: 500;
         }}
 
         .content {{
-            padding: 32px;
+            padding: 40px;
         }}
 
         .stats-grid {{
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 32px;
+            gap: 20px;
+            margin-bottom: 40px;
         }}
 
         .stat-card {{
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 20px;
+            background: linear-gradient(135deg, #f8fafb 0%, #f1f3f5 100%);
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 24px;
             text-align: center;
+            transition: all 0.3s ease;
+        }}
+
+        .stat-card:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
         }}
 
         .stat-label {{
-            font-size: 12px;
-            font-weight: 600;
+            font-size: 11px;
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #495057;
-            margin-bottom: 8px;
+            letter-spacing: 1px;
+            color: #6c757d;
+            margin-bottom: 12px;
         }}
 
         .stat-value {{
-            font-size: 20px;
-            font-weight: 700;
-            color: #1a1d1f;
+            font-size: 26px;
+            font-weight: 800;
+            color: #2d3748;
+            line-height: 1;
         }}
 
         .section-header {{
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1.2px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
             text-transform: uppercase;
-            color: #495057;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 2px solid #e9ecef;
+            color: #6c757d;
+            margin-bottom: 24px;
+            margin-top: 48px;
         }}
 
         .category-item {{
             background: #ffffff;
             border: 1px solid #e9ecef;
-            border-radius: 10px;
+            border-radius: 12px;
             padding: 20px;
-            margin-bottom: 12px;
-            transition: all 0.2s ease;
+            margin-bottom: 16px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }}
+
+        .category-item::before {{
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }}
 
         .category-item:hover {{
-            border-color: #dee2e6;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            transform: translateY(-2px);
+        }}
+
+        .category-item:hover::before {{
+            opacity: 1;
         }}
 
         .category-header {{
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
-            gap: 12px;
-            flex-wrap: wrap;
+            margin-bottom: 12px;
         }}
 
         .category-name {{
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 600;
-            color: #1a1d1f;
+            color: #2d3748;
             display: flex;
             align-items: center;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            max-width: 70%;
         }}
 
         .category-indicator {{
-            width: 4px;
-            height: 20px;
-            border-radius: 2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
             margin-right: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         }}
 
         .category-amount {{
-            font-size: 17px;
-            font-weight: 700;
+            font-size: 20px;
+            font-weight: 800;
+            color: #2d3748;
         }}
 
         .category-meta {{
-            font-size: 13px;
-            color: #495057;
+            font-size: 12px;
+            color: #718096;
+            margin-bottom: 12px;
+        }}
+
+        .progress-bar {{
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 12px;
+        }}
+
+        .progress-fill {{
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.6s ease;
         }}
 
         .merchant-list {{
-            background: #ffffff;
+            background: #f8fafb;
             border: 1px solid #e9ecef;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 32px;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 40px;
         }}
 
         .merchant-item {{
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 14px 0;
-            border-bottom: 1px solid #f8f9fa;
-            gap: 8px;
-            flex-wrap: wrap;
+            padding: 16px;
+            background: #ffffff;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            transition: all 0.2s ease;
+            border: 1px solid #f1f3f5;
         }}
 
         .merchant-item:last-child {{
-            border-bottom: none;
+            margin-bottom: 0;
+        }}
+
+        .merchant-item:hover {{
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            transform: translateX(4px);
         }}
 
         .merchant-rank {{
-            font-size: 14px;
-            font-weight: 700;
-            color: #adb5bd;
-            min-width: 32px;
+            font-size: 11px;
+            font-weight: 800;
+            color: #9ca3af;
+            min-width: 28px;
+            background: #f1f3f5;
+            padding: 4px 8px;
+            border-radius: 6px;
+            text-align: center;
         }}
 
         .merchant-name {{
             flex: 1;
-            font-size: 15px;
-            font-weight: 500;
-            color: #1a1d1f;
+            font-size: 14px;
+            font-weight: 600;
+            color: #374151;
             margin: 0 16px;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
             overflow: hidden;
             text-overflow: ellipsis;
+            white-space: nowrap;
         }}
 
         .merchant-count {{
-            font-size: 13px;
-            color: #495057;
-            margin-right: 16px;
+            font-size: 12px;
+            color: #6c757d;
+            margin-right: 12px;
+            padding: 4px 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
         }}
 
         .merchant-amount {{
-            font-size: 16px;
-            font-weight: 700;
-            color: #1a1d1f;
+            font-size: 15px;
+            font-weight: 800;
+            color: #2d3748;
         }}
 
         .subscription-card {{
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border: 2px solid #dee2e6;
-            border-radius: 10px;
-            padding: 24px;
-            margin-bottom: 32px;
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 40px;
         }}
 
         .subscription-header {{
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
-            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
         }}
 
         .subscription-title {{
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 700;
-            color: #1a1d1f;
+            color: #2d3748;
         }}
 
         .subscription-total {{
-            font-size: 13px;
-            color: #495057;
+            font-size: 14px;
+            font-weight: 700;
+            color: #667eea;
         }}
 
         .subscription-item {{
             background: #ffffff;
-            border-radius: 8px;
-            padding: 16px;
+            border: 1px solid #f1f3f5;
+            border-radius: 10px;
+            padding: 18px;
             margin-bottom: 12px;
+            transition: all 0.2s ease;
+        }}
+
+        .subscription-item:hover {{
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
         }}
 
         .footer {{
-            background: #f8f9fa;
-            padding: 24px 32px;
+            background: #f8fafb;
+            padding: 32px 40px;
             text-align: center;
             border-top: 1px solid #e9ecef;
+            border-radius: 0 0 16px 16px;
         }}
 
         .footer-text {{
-            font-size: 13px;
-            color: #495057;
+            font-size: 12px;
+            color: #6c757d;
+            line-height: 1.8;
+        }}
+
+        .footer-link {{
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }}
+
+        /* Mobile responsiveness */
+        @media only screen and (max-width: 600px) {{
+            .email-wrapper {{
+                padding: 24px 16px;
+            }}
+
+            .container {{
+                border-radius: 12px;
+            }}
+
+            .header {{
+                padding: 32px 24px;
+            }}
+
+            .header-amount {{
+                font-size: 44px;
+            }}
+
+            .content {{
+                padding: 24px;
+            }}
+
+            .stats-grid {{
+                gap: 12px;
+            }}
+
+            .stat-card {{
+                padding: 16px;
+            }}
+
+            .category-item {{
+                padding: 16px;
+            }}
+
+            .merchant-list {{
+                padding: 16px;
+            }}
+
+            .merchant-item {{
+                padding: 12px;
+            }}
+
+            .footer {{
+                padding: 24px;
+            }}
         }}
 
         /* Dark mode support */
@@ -1933,7 +2050,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         border_color = category_colors.get(category, '#95A5A6')
 
         html += f"""
-                <div class="category-item">
+                <div class="category-item" style="border-left-color: {border_color};">
                     <div class="category-header">
                         <div class="category-name">
                             <div class="category-indicator" style="background: {border_color};"></div>
@@ -1942,6 +2059,9 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                         <div class="category-amount" style="color: {border_color};">${amount:,.2f}</div>
                     </div>
                     <div class="category-meta">{percentage:.1f}% of total spending</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {percentage}%; background: linear-gradient(90deg, {border_color}, {border_color}dd);"></div>
+                    </div>
                 </div>"""
 
     # Subscriptions section
