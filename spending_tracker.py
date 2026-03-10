@@ -664,7 +664,7 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     entertainment_keywords = [
         'NETFLIX', 'SPOTIFY', 'DISNEY', 'APPLE TV', 'AMAZON PRIME VIDEO',
         'MIRVISH', 'CINEPLEX', 'LANDMARK CINEMA', 'GOODLIFE', 'LA FITNESS',
-        'YMCA', 'GYM', 'THEATRE', 'THEATER', 'CONCERT'
+        'YMCA', 'GYM', 'THEATRE', 'THEATER', 'CONCERT', 'CLASSPASS', 'GROUPON'
     ]
     for keyword in entertainment_keywords:
         if keyword in text:
@@ -887,8 +887,8 @@ STEP 5: CHECK FOR HEALTH (if merchant contains ANY of these keywords → Health)
 STEP 6: CHECK FOR ENTERTAINMENT (if merchant contains ANY of these keywords → Entertainment):
 - "NETFLIX", "SPOTIFY", "DISNEY", "APPLE TV", "AMAZON PRIME VIDEO"
 - "MIRVISH", "CINEPLEX", "LANDMARK CINEMA"
-- "GOODLIFE", "LA FITNESS", "YMCA", "GYM"
-- "THEATRE", "THEATER", "CONCERT"
+- "GOODLIFE", "LA FITNESS", "YMCA", "GYM", "CLASSPASS"
+- "THEATRE", "THEATER", "CONCERT", "GROUPON"
 
 STEP 7: CHECK FOR FOOD & DINING (restaurants, cafes, fast food):
 - "RESTAURANT", "BISTRO", "CAFE", "COFFEE", "BAR", "PUB"
