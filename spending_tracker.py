@@ -605,7 +605,7 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
         'FRESHCO', 'FRESH CO', 'LONGOS', 'LONGO', 'FORTINOS', 'WALMART GROCERY',
         'WALMART SUPERCENTRE', 'SUPERSTORE', 'REAL CANADIAN SUPERSTORE', 'T&T SUPERMARKET',
         'WHOLE FOODS', 'INDEPENDENT GROCER', 'YOUR INDEPENDENT', 'VALU-MART', 'VALUMART',
-        'ZEHRS', 'SUPERMARKET', 'GROCERY STORE'
+        'ZEHRS', 'DOLLARAMA', 'SUPERMARKET', 'GROCERY STORE'
     ]
     # Exclude Costco Gas from groceries
     if 'COSTCO GAS' not in text and 'COSTCO FUEL' not in text:
@@ -628,10 +628,10 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
 
     # STEP 3: TRANSPORT (ground transportation, gas, parking)
     transport_keywords = [
-        'UBER', 'LYFT', 'BOLT', 'TAXI', 'CAB', 'PARKING TICKET', 'PARKING METER', 'GREEN P',
-        'TTC', 'GO TRANSIT', 'PRESTO', 'SHELL', 'ESSO', 'PETRO-CANADA',
+        'UBER', 'LYFT', 'BOLT', 'TAXI', 'CAB', 'BECK TAXI', 'PARKING TICKET', 'PARKING METER',
+        'GREEN P', 'TTC', 'GO TRANSIT', 'PRESTO', 'SHELL', 'ESSO', 'PETRO-CANADA',
         'CANADIAN TIRE GAS', 'COSTCO GAS', 'COSTCO FUEL', 'ZIPCAR', 'CAR2GO',
-        'ENTERPRISE RENT'
+        'ENTERPRISE RENT', 'SIXT', 'BUDGET RENT'
     ]
     # Also check for generic gas/fuel indicators
     if any(keyword in text for keyword in transport_keywords):
@@ -665,7 +665,8 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     entertainment_keywords = [
         'NETFLIX', 'SPOTIFY', 'DISNEY', 'APPLE TV', 'AMAZON PRIME VIDEO',
         'MIRVISH', 'CINEPLEX', 'LANDMARK CINEMA', 'GOODLIFE', 'LA FITNESS',
-        'YMCA', 'GYM', 'THEATRE', 'THEATER', 'CONCERT', 'CLASSPASS', 'GROUPON'
+        'YMCA', 'GYM', 'THEATRE', 'THEATER', 'CONCERT', 'CLASSPASS', 'GROUPON',
+        'TICKETMASTER', 'SEATGEEK', 'DICE.FM'
     ]
     for keyword in entertainment_keywords:
         if keyword in text:
@@ -674,9 +675,9 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     # STEP 7: FOOD & DINING
     dining_keywords = [
         'RESTAURANT', 'BISTRO', 'CAFE', 'COFFEE', 'BAR', 'PUB', 'STARBUCKS',
-        'TIM HORTONS', 'SECOND CUP', 'MCDONALD', 'BURGER KING', 'WENDY',
-        'KFC', 'SUBWAY', 'PIZZA', 'UBEREATS', 'DOORDASH', 'SKIP THE DISHES',
-        'FOODORA'
+        'TIM HORTONS', 'SECOND CUP', 'BALZAC', 'MCDONALD', 'BURGER KING', 'WENDY',
+        'KFC', 'SUBWAY', 'A&W', 'PIZZA', 'SHAWARMA', 'RAMEN', 'SUSHI',
+        'UBEREATS', 'DOORDASH', 'SKIP THE DISHES', 'FOODORA'
     ]
     for keyword in dining_keywords:
         if keyword in text:
@@ -685,8 +686,9 @@ def categorize_by_keywords(merchant: str, description: str) -> Optional[str]:
     # STEP 8: SHOPPING
     shopping_keywords = [
         'AMAZON.CA', 'AMAZON.COM', 'AMZN', 'BEST BUY', 'STAPLES', 'HOME DEPOT',
-        'CANADIAN TIRE', 'H&M', 'ZARA', 'WINNERS', 'MARSHALLS', 'TARGET',
-        'ALCANSIDE'
+        'CANADIAN TIRE', 'WWW.CANADIANTIRE.CA', 'H&M', 'ZARA', 'WINNERS', 'MARSHALLS',
+        'TARGET', 'ALCANSIDE', 'TEMU.COM', 'TEMU', 'AMERICAN EAGLE', 'BROWN\'S SHOES',
+        'CARTERS', 'WARBY PARKER'
     ]
     for keyword in shopping_keywords:
         if keyword in text:
@@ -843,7 +845,7 @@ STEP 1: CHECK FOR GROCERIES (if merchant contains ANY of these keywords → Groc
 - "WHOLE FOODS"
 - "INDEPENDENT GROCER", "YOUR INDEPENDENT"
 - "VALU-MART", "VALUMART"
-- "ZEHRS"
+- "ZEHRS", "DOLLARAMA"
 - "SUPERMARKET", "GROCERY", "MARKET" (in name)
 
 STEP 2: CHECK FOR TRAVEL (if merchant contains ANY of these keywords → Travel):
@@ -865,12 +867,12 @@ STEP 2: CHECK FOR TRAVEL (if merchant contains ANY of these keywords → Travel)
 
 STEP 3: CHECK FOR TRANSPORT (if merchant contains ANY of these keywords → Transport):
 - "UBER", "LYFT", "BOLT"
-- "TAXI", "CAB"
+- "TAXI", "CAB", "BECK TAXI"
 - "PARKING TICKET", "PARKING METER", "GREEN P"
 - "TTC", "GO TRANSIT", "PRESTO"
 - "SHELL", "ESSO", "PETRO-CANADA", "CANADIAN TIRE GAS", "COSTCO GAS"
 - Gas stations (anything with "GAS", "FUEL", "PETROL")
-- "ZIPCAR", "CAR2GO", "ENTERPRISE RENT"
+- "ZIPCAR", "CAR2GO", "ENTERPRISE RENT", "SIXT", "BUDGET RENT"
 
 STEP 4: CHECK FOR BILLS & UTILITIES (if merchant contains ANY of these keywords → Bills & Utilities):
 - "ROGERS", "BELL CANADA", "TELUS", "FIDO", "KOODO"
@@ -894,20 +896,23 @@ STEP 6: CHECK FOR ENTERTAINMENT (if merchant contains ANY of these keywords → 
 - "MIRVISH", "CINEPLEX", "LANDMARK CINEMA"
 - "GOODLIFE", "LA FITNESS", "YMCA", "GYM", "CLASSPASS"
 - "THEATRE", "THEATER", "CONCERT", "GROUPON"
+- "TICKETMASTER", "SEATGEEK", "DICE.FM"
 
 STEP 7: CHECK FOR FOOD & DINING (restaurants, cafes, fast food):
 - "RESTAURANT", "BISTRO", "CAFE", "COFFEE", "BAR", "PUB"
-- "STARBUCKS", "TIM HORTONS", "SECOND CUP"
-- "MCDONALD", "BURGER KING", "WENDY", "KFC", "SUBWAY", "PIZZA"
+- "STARBUCKS", "TIM HORTONS", "SECOND CUP", "BALZAC"
+- "MCDONALD", "BURGER KING", "WENDY", "KFC", "SUBWAY", "A&W", "PIZZA"
+- "SHAWARMA", "RAMEN", "SUSHI"
 - "UBEREATS", "DOORDASH", "SKIP THE DISHES", "FOODORA"
 - "BIFF", "FOXLEY", "MONKEY BUSINESS" (Toronto restaurants)
 
 STEP 8: CHECK FOR SHOPPING (retail, Amazon, general stores):
 - "AMAZON.CA", "AMAZON.COM", "AMZN"
-- "BEST BUY", "STAPLES", "HOME DEPOT", "CANADIAN TIRE"
+- "BEST BUY", "STAPLES", "HOME DEPOT", "CANADIAN TIRE", "WWW.CANADIANTIRE.CA"
 - "H&M", "ZARA", "WINNERS", "MARSHALLS"
 - "TARGET", "WALMART" (not grocery)
-- "ALCANSIDE" (phone cases)
+- "ALCANSIDE" (phone cases), "TEMU.COM", "TEMU"
+- "AMERICAN EAGLE", "BROWN'S SHOES", "CARTERS", "WARBY PARKER"
 - General retail stores
 
 STEP 9: OTHER (everything else):
@@ -1176,7 +1181,8 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
             'NAPLES', 'WILTON MANORS', 'SAN FRANCISCO', 'NEW YORK',
             'DUBAI', 'ABU DHABI', 'ABUDHABI', 'CANCUN', 'CIUDAD DE MEX',
             'ISLA MUJERES', 'BENITO JUAREZ', 'ALAJUELA', 'LIMASSOL',
-            'EDMONTON INTE', 'PHOENIX', 'CHICAGO',
+            'EDMONTON INTE', 'PHOENIX', 'CHICAGO', 'AMSTERDAM', 'GIBRALTAR',
+            'PULLACH', 'DUBLIN',
         ]
         if any(city in merchant_city for city in foreign_cities):
             return True
@@ -1205,14 +1211,14 @@ def calculate_spending_insights(transactions: List[Transaction]) -> Dict[str, An
             'DRYNK BAR', 'TST*EAGLE BAR', 'TST*HUNTERS',
             'BAILEYS LIQUORS', 'EJS BAYFRONT', 'FOUR SEASONS SUNSET',
             'BRIGHTLINE', 'LAS OLAS', 'MY TROPX', 'SEA SIDE',
-            'ROSA SKY', 'TACO BELL', 'NICKS PIZZA', 'SUGAR',
+            'ROSA SKY', 'NICKS PIZZA', 'SUGAR',
             'CVS/PHARMACY', 'GELATO', 'TST*OSTERIA TULIA',
             'WESTIN BEACH', 'CLUB FT LAUDERDALE', 'GROUPON',
             'GB UNIVERSAL', 'HELLOWISP', 'LYFT',
             # Costa Rica
             'ALAJUELA', 'BUDGET RENT A CAR',
             # Europe
-            'SOLIHULL',
+            'SOLIHULL', 'AMSTERDAM', 'GIBRALTAR', 'PULLACH', 'DUBLIN',
             # Amazon Dubai
             'AMAZON (MARKET PLACE-EC',
         ]
@@ -1312,22 +1318,22 @@ def detect_pattern_subscriptions(year: int, month: int) -> List[Dict[str, Any]]:
         amounts_rounded = [round(tx['amount'], 2) for tx in txs_sorted]
         avg_amount = sum(amounts_rounded) / len(amounts_rounded)
 
-        # Allow 10% variation to account for taxes, exchange rates, small plan changes
-        max_variation = avg_amount * 0.10
+        # Allow 20% variation to account for taxes, exchange rates, small plan changes
+        max_variation = avg_amount * 0.20
         amount_range = max(amounts_rounded) - min(amounts_rounded)
 
         # If variation is too large, skip (not a subscription)
         if amount_range > max_variation:
             continue
 
-        # Check if intervals are 28-35 days (approximately monthly)
+        # Check if intervals are 27-36 days (approximately monthly)
         intervals = []
         for i in range(1, len(txs_sorted)):
             days_diff = (txs_sorted[i]['date'] - txs_sorted[i-1]['date']).days
             intervals.append(days_diff)
 
-        # Check if intervals are monthly (28-35 days)
-        if intervals and all(28 <= interval <= 35 for interval in intervals):
+        # Check if intervals are monthly (27-36 days, expanded for February edge cases)
+        if intervals and all(27 <= interval <= 36 for interval in intervals):
             subscriptions.append({
                 'merchant': txs_sorted[0]['merchant'],
                 'normalized': normalized_merchant,
@@ -1468,16 +1474,16 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         }}
 
         .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 32px;
+            background: linear-gradient(135deg, #6B8DD6 0%, #8E9AAF 100%);
+            padding: 36px 32px;
             text-align: center;
             color: #ffffff;
         }}
 
         .header-title {{
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
-            letter-spacing: 1.5px;
+            letter-spacing: 1.2px;
             text-transform: uppercase;
             color: #ffffff !important;
             opacity: 0.9;
@@ -1485,9 +1491,9 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         }}
 
         .header-amount {{
-            font-size: 48px;
+            font-size: 38px;
             font-weight: 700;
-            letter-spacing: -1px;
+            letter-spacing: -0.5px;
             color: #ffffff !important;
             margin-bottom: 8px;
             word-wrap: break-word;
@@ -1495,9 +1501,9 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         }}
 
         .header-subtitle {{
-            font-size: 15px;
+            font-size: 14px;
             color: #ffffff !important;
-            opacity: 0.85;
+            opacity: 0.9;
         }}
 
         .content {{
@@ -1528,7 +1534,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         }}
 
         .stat-value {{
-            font-size: 24px;
+            font-size: 20px;
             font-weight: 700;
             color: #1a1d1f;
         }}
@@ -1586,7 +1592,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
         }}
 
         .category-amount {{
-            font-size: 20px;
+            font-size: 17px;
             font-weight: 700;
         }}
 
@@ -1712,7 +1718,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
             }}
 
             .header {{
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+                background: linear-gradient(135deg, #6B8DD6 0%, #8E9AAF 100%) !important;
             }}
 
             .header-title {{
