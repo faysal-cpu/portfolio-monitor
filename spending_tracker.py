@@ -1962,16 +1962,16 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                         <td style="padding: 0 30px 8px 30px;">
                             <table border="0" cellpadding="12" cellspacing="0" width="100%" style="background-color: #ffffff; border: 1px solid #e9ecef;">
                                 <tr>
-                                    <td width="8%" style="font-size: 11px; font-weight: bold; color: #9ca3af; background-color: #f8f9fa;">
+                                    <td width="10%" style="font-size: 11px; font-weight: bold; color: #9ca3af; background-color: #f8f9fa; vertical-align: top;">
                                         #{idx}
                                     </td>
-                                    <td width="42%" style="font-size: 14px; font-weight: bold; color: #374151;">
+                                    <td style="font-size: 14px; font-weight: bold; color: #374151; word-wrap: break-word; vertical-align: top;">
                                         {merchant}
                                     </td>
-                                    <td width="25%" style="font-size: 12px; color: #6c757d; background-color: #f8f9fa;">
+                                    <td width="25%" style="font-size: 12px; color: #6c757d; white-space: nowrap; vertical-align: top;">
                                         {data['count']} visits
                                     </td>
-                                    <td width="25%" align="right" style="font-size: 15px; font-weight: bold; color: #2d3748;">
+                                    <td width="25%" align="right" style="font-size: 15px; font-weight: bold; color: #2d3748; white-space: nowrap; vertical-align: top;">
                                         ${data['amount']:,.2f}
                                     </td>
                                 </tr>
@@ -2000,16 +2000,16 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                         <td style="padding: 0 30px 8px 30px;">
                             <table border="0" cellpadding="12" cellspacing="0" width="100%" style="background-color: #ffffff; border: 1px solid #e9ecef;">
                                 <tr>
-                                    <td width="8%" style="font-size: 11px; font-weight: bold; color: #9ca3af; background-color: #f8f9fa;">
+                                    <td width="10%" style="font-size: 11px; font-weight: bold; color: #9ca3af; background-color: #f8f9fa; vertical-align: top;">
                                         #{idx}
                                     </td>
-                                    <td width="42%" style="font-size: 14px; font-weight: bold; color: #374151;">
+                                    <td style="font-size: 14px; font-weight: bold; color: #374151; word-wrap: break-word; vertical-align: top;">
                                         {merchant}
                                     </td>
-                                    <td width="25%" style="font-size: 12px; color: #6c757d; background-color: #f8f9fa;">
+                                    <td width="25%" style="font-size: 12px; color: #6c757d; white-space: nowrap; vertical-align: top;">
                                         {data['count']} txns
                                     </td>
-                                    <td width="25%" align="right" style="font-size: 15px; font-weight: bold; color: #2d3748;">
+                                    <td width="25%" align="right" style="font-size: 15px; font-weight: bold; color: #2d3748; white-space: nowrap; vertical-align: top;">
                                         ${data['amount']:,.2f}
                                     </td>
                                 </tr>
