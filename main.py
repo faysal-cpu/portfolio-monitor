@@ -346,7 +346,9 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
             holdings_text += f"  Reddit: {data.get('reddit_sentiment', 'N/A')}\n"
 
-        prompt = f"""You are a sharp portfolio analyst for a Canadian retail investor using a self-directed TFSA.
+        prompt = f"""CRITICAL: Respond ONLY with pipe-delimited lines. NO explanatory text. NO preamble. NO markdown.
+
+You are a sharp portfolio analyst for a Canadian retail investor using a self-directed TFSA.
 
 MACRO CONTEXT:
 {macro_context}
@@ -354,16 +356,17 @@ MACRO CONTEXT:
 HOLDINGS DATA:
 {holdings_text}
 
-For each stock give:
-- RECOMMENDATION: BUY MORE / HOLD / SELL / WATCH
-- CONFIDENCE: HIGH / MEDIUM / LOW
-- REASON: 1-2 sentences (max 30 words). Include specific catalyst, data point, or price level. Be concrete and actionable.
-- RISK: one key risk to watch right now
+Output EXACTLY one line per stock in this format:
+TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK
 
-Consider: price action, news, Reddit sentiment, geopolitical context. Be direct and opinionated. If something should be sold, say so clearly.
+RECOMMENDATION: BUY MORE or HOLD or SELL or WATCH
+CONFIDENCE: HIGH or MEDIUM or LOW
+REASON: 1-2 sentences (max 30 words). Specific catalyst or price level.
+RISK: one key risk (max 15 words)
 
-Format each stock as:
-TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK"""
+Consider: price action, news, Reddit sentiment, geopolitical context.
+
+Start immediately with the first ticker line. Nothing else."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -451,18 +454,22 @@ def find_opportunities(trending_data: List[Dict]) -> str:
             if data.get('headlines'):
                 trending_text += f"  News: {'; '.join(data['headlines'][:2])}\n"
 
-        prompt = f"""Identify 5 tickers to consider buying today. Investor profile: Canadian TFSA, likes momentum plays, binary catalysts, defence, AI, commodities, small caps. Somewhat risk tolerant.
+        prompt = f"""CRITICAL: Respond ONLY with pipe-delimited lines. NO explanatory text. NO preamble. NO markdown. NO introductions.
+
+Investor profile: Canadian TFSA, momentum plays, binary catalysts, defence, AI, commodities, small caps. Somewhat risk tolerant.
 
 TRENDING TICKERS:
 {trending_text}
 
-For each of 5 tickers, provide:
+Output EXACTLY 5 lines in this format:
 TICKER|COMPANY|WHY TODAY|UPSIDE|RISK|EXCHANGE
 
-WHY TODAY: be specific about why this is relevant TODAY
-UPSIDE POTENTIAL: HIGH/MEDIUM
-RISK: one warning
-EXCHANGE: TSX or US"""
+WHY TODAY: be specific about why this is relevant TODAY (max 15 words)
+UPSIDE: HIGH or MEDIUM
+RISK: one key warning (max 10 words)
+EXCHANGE: TSX or US
+
+Start immediately with the first ticker line. Nothing else."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
