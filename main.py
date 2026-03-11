@@ -480,7 +480,7 @@ EXCHANGE: TSX or US"""
 
 
 def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Dict]:
-    """Parse Claude's analysis into structured data"""
+    """Parse Claude's analysis into structured data - ROBUST VERSION"""
     parsed = []
 
     if analysis == "ANALYSIS_FAILED":
@@ -500,53 +500,83 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
 
     # Parse pipe-delimited format
     lines = analysis.strip().split('\n')
-    data_map = {d['ticker']: d for d in holdings_data}
+
+    # Create case-insensitive ticker lookup
+    data_map = {d['ticker'].upper(): d for d in holdings_data}
+    ticker_lookup = {d['ticker'].upper(): d['ticker'] for d in holdings_data}
+
+    # Track which tickers we've parsed
+    parsed_tickers = set()
 
     for line in lines:
         if '|' in line:
             parts = line.split('|')
             if len(parts) >= 5:
-                ticker = parts[0].strip()
-                if ticker in data_map:
+                ticker_raw = parts[0].strip()
+                ticker_upper = ticker_raw.upper()
+
+                # Case-insensitive lookup
+                if ticker_upper in data_map:
+                    original_ticker = ticker_lookup[ticker_upper]
                     parsed.append({
-                        'ticker': ticker,
-                        'price': data_map[ticker]['price'],
-                        'change_percent': data_map[ticker]['change_percent'],
+                        'ticker': original_ticker,
+                        'price': data_map[ticker_upper]['price'],
+                        'change_percent': data_map[ticker_upper]['change_percent'],
                         'recommendation': parts[1].strip(),
                         'confidence': parts[2].strip(),
                         'reason': parts[3].strip(),
                         'risk': parts[4].strip() if len(parts) > 4 else 'N/A',
-                        'reddit': data_map[ticker].get('reddit_sentiment', 'N/A')
+                        'reddit': data_map[ticker_upper].get('reddit_sentiment', 'N/A')
                     })
+                    parsed_tickers.add(ticker_upper)
+                else:
+                    logger.warning(f"Holdings parser: Ticker '{ticker_raw}' in Claude response not found in holdings_data")
+
+    # Log missing tickers
+    missing_tickers = set(ticker_lookup.keys()) - parsed_tickers
+    if missing_tickers:
+        logger.warning(f"Holdings parser: {len(missing_tickers)} tickers not found in Claude response: {missing_tickers}")
+
+    # Validation
+    if len(parsed) == 0:
+        logger.error("⚠️ CRITICAL: Holdings parser returned 0 results! Check Claude's response format.")
+        logger.error(f"Claude response preview: {analysis[:500]}...")
+    else:
+        logger.info(f"✓ Holdings parser: Successfully parsed {len(parsed)} out of {len(holdings_data)} tickers")
 
     return parsed
 
 
 def parse_opportunities(opportunities: str) -> List[Dict]:
-    """Parse Claude's opportunities into structured data"""
+    """Parse Claude's opportunities into structured data - ROBUST VERSION"""
     parsed = []
 
     if opportunities == "OPPORTUNITIES_UNAVAILABLE":
+        logger.warning("Opportunities marked as unavailable")
         return []
 
     lines = opportunities.strip().split('\n')
 
-    # Placeholder patterns to filter out
-    placeholder_patterns = ['TICKER', 'COMPANY', 'WHY TODAY', 'UPSIDE', 'RISK', 'EXCHANGE']
+    # Only filter out the exact header line
+    header_pattern = "TICKER|COMPANY|WHY TODAY|UPSIDE|RISK|EXCHANGE"
 
     for line in lines:
         if '|' in line:
+            # Skip the exact header line (case-insensitive)
+            if line.strip().upper() == header_pattern.upper():
+                continue
+
             parts = line.split('|')
             if len(parts) >= 6:
                 ticker = parts[0].strip()
                 company = parts[1].strip()
 
-                # Skip if ticker or company matches placeholder patterns
-                if ticker.upper() in placeholder_patterns or company.upper() in placeholder_patterns:
+                # Skip if ticker is empty or just whitespace
+                if not ticker or not company:
                     continue
 
-                # Skip if ticker contains placeholder-like text
-                if any(placeholder in ticker.upper() for placeholder in placeholder_patterns):
+                # Skip only if it's EXACTLY one of the column names (less aggressive)
+                if ticker.upper() == "TICKER" or company.upper() == "COMPANY":
                     continue
 
                 parsed.append({
@@ -557,6 +587,13 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                     'risk': parts[4].strip(),
                     'exchange': parts[5].strip()
                 })
+
+    # Validation
+    if len(parsed) == 0:
+        logger.error("⚠️ CRITICAL: Opportunities parser returned 0 results! Check Claude's response format.")
+        logger.error(f"Claude response preview: {opportunities[:500]}...")
+    else:
+        logger.info(f"✓ Opportunities parser: Successfully parsed {len(parsed)} opportunities")
 
     return parsed[:5]  # Limit to 5
 
@@ -1097,13 +1134,37 @@ def run_portfolio_analysis():
     # Step 4: Analyze holdings with Claude
     logger.info("Analyzing holdings with Claude...")
     analysis = analyze_holdings(holdings_data, macro_context)
+
+    # DEBUG: Log Claude's raw response for holdings
+    logger.info("="*60)
+    logger.info("DEBUG - Holdings Analysis from Claude")
+    logger.info("="*60)
+    logger.info(f"Response length: {len(analysis)} characters")
+    logger.info(f"Response preview (first 800 chars):\n{analysis[:800]}")
+    logger.info("="*60)
+
     parsed_holdings = parse_holdings_analysis(analysis, holdings_data)
 
     # Step 5: Find new opportunities
     logger.info("Finding new opportunities...")
     trending_data = get_trending_tickers(finnhub_client, reddit_client, holdings)
     opportunities_text = find_opportunities(trending_data)
+
+    # DEBUG: Log Claude's raw response for opportunities
+    logger.info("="*60)
+    logger.info("DEBUG - Opportunities from Claude")
+    logger.info("="*60)
+    logger.info(f"Response length: {len(opportunities_text)} characters")
+    logger.info(f"Response preview (first 800 chars):\n{opportunities_text[:800]}")
+    logger.info("="*60)
+
     parsed_opportunities = parse_opportunities(opportunities_text)
+
+    # Validation: Check if parsing succeeded
+    if len(parsed_holdings) == 0:
+        logger.error("⚠️⚠️⚠️ CRITICAL WARNING: No holdings were parsed! Email will have empty holdings section!")
+    if len(parsed_opportunities) == 0:
+        logger.warning("⚠️ WARNING: No opportunities were parsed! Email will have no opportunities section.")
 
     # Step 6: Create email
     logger.info("Creating email...")
