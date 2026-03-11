@@ -126,6 +126,7 @@ def get_macro_context(date_str: str) -> str:
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1500,
+            temperature=0.3,
             messages=[{"role": "user", "content": prompt}],
             tools=[{"type": "web_search_20250305", "name": "web_search"}]
         )
@@ -346,9 +347,7 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
             holdings_text += f"  Reddit: {data.get('reddit_sentiment', 'N/A')}\n"
 
-        prompt = f"""CRITICAL: Respond ONLY with pipe-delimited lines. NO explanatory text. NO preamble. NO markdown.
-
-You are a sharp portfolio analyst for a Canadian retail investor using a self-directed TFSA.
+        prompt = f"""You are a decisive portfolio analyst for a Canadian retail investor using a self-directed TFSA. Your job is to SYNTHESIZE all available information and give ONE clear recommendation per stock.
 
 MACRO CONTEXT:
 {macro_context}
@@ -356,21 +355,29 @@ MACRO CONTEXT:
 HOLDINGS DATA:
 {holdings_text}
 
-Output EXACTLY one line per stock in this format:
+INSTRUCTIONS:
+1. Consider ALL factors: price action, news, Reddit sentiment, macro context
+2. Weigh the pros and cons of each position
+3. Give ONE clear decisive recommendation - don't hedge
+4. Your analysis should be consistent unless underlying data changes significantly
+5. Be direct and opinionated - if you say HOLD, mean it. If you say SELL, mean it.
+
+CRITICAL: Output ONLY pipe-delimited lines. NO explanatory text. NO preamble.
+
+Format (one line per stock):
 TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK
 
-RECOMMENDATION: BUY MORE or HOLD or SELL or WATCH
-CONFIDENCE: HIGH or MEDIUM or LOW
-REASON: 1-2 sentences (max 30 words). Specific catalyst or price level.
-RISK: one key risk (max 15 words)
+RECOMMENDATION: BUY MORE, HOLD, SELL, or WATCH
+CONFIDENCE: HIGH, MEDIUM, or LOW
+REASON: Specific catalyst or data point (max 30 words)
+RISK: Key risk to watch (max 15 words)
 
-Consider: price action, news, Reddit sentiment, geopolitical context.
-
-Start immediately with the first ticker line. Nothing else."""
+Start immediately with the first ticker line."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=3000,
+            temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -474,6 +481,7 @@ Start immediately with the first ticker line. Nothing else."""
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
+            temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
         )
 
