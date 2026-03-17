@@ -19,7 +19,7 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
         posts = []
         
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'python:portfolio-monitor:v1.0.0 (by /u/investor)'
         }
         
         for sub_name in subreddits:
@@ -28,23 +28,21 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
                 url = f'https://www.reddit.com/r/{sub_name}/search.json'
                 params = {
                     'q': ticker,
-                    'restrict_sr': '1',  # Restrict to this subreddit
+                    'restrict_sr': '1',
                     'sort': 'relevance',
-                    't': 'day',  # Time filter: day
+                    't': 'day',
                     'limit': 10
                 }
                 
-                response = requests.get(url, headers=headers, params=params, timeout=10)
+                response = requests.get(url, headers=headers, params=params, timeout=15)
                 
                 if response.status_code == 200:
                     data = response.json()
                     
-                    # Extract posts from JSON
                     if 'data' in data and 'children' in data['data']:
                         for child in data['data']['children']:
                             post_data = child.get('data', {})
                             
-                            # Check if ticker is actually mentioned in title or selftext
                             title = post_data.get('title', '').upper()
                             selftext = post_data.get('selftext', '').upper()
                             
@@ -56,9 +54,14 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
                                     'upvote_ratio': post_data.get('upvote_ratio', 0.5),
                                     'subreddit': sub_name
                                 })
+                elif response.status_code == 429:
+                    logger.warning(f"Reddit rate limit hit for r/{sub_name}")
+                    time.sleep(2)
+                    continue
+                else:
+                    logger.warning(f"Reddit returned status {response.status_code} for r/{sub_name}")
                 
-                # Be nice to Reddit - small delay between requests
-                time.sleep(1)
+                time.sleep(2)
                 
             except Exception as e:
                 logger.warning(f"Error searching r/{sub_name} for {ticker}: {e}")
@@ -67,7 +70,6 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
         if mentions == 0:
             return 0, "No Reddit activity"
         
-        # Determine sentiment from top 3 posts by score
         top_posts = sorted(posts, key=lambda x: x['score'], reverse=True)[:3]
         
         if not top_posts:
@@ -75,7 +77,6 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
         
         avg_ratio = sum(p['upvote_ratio'] for p in top_posts) / len(top_posts)
         
-        # Sentiment based on upvote ratio
         if avg_ratio > 0.7:
             sentiment = "BULLISH 🚀"
         elif avg_ratio < 0.4:
@@ -83,7 +84,6 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
         else:
             sentiment = "NEUTRAL"
         
-        # Get most upvoted post title for context
         top_title = top_posts[0]['title'][:80] if top_posts else ""
         
         return mentions, f"{mentions} mentions - {sentiment} | Top: \"{top_title}...\""
@@ -104,10 +104,9 @@ def test_reddit_scraper():
         mentions, sentiment = get_reddit_sentiment(ticker)
         print(f"  Result: {sentiment}")
         print(f"  Mentions: {mentions}\n")
-        time.sleep(2)  # Be nice to Reddit
+        time.sleep(3)
 
 
 if __name__ == "__main__":
-    # Test it
     logging.basicConfig(level=logging.INFO)
     test_reddit_scraper()
