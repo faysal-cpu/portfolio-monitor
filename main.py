@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import anthropic
 import finnhub
-from reddit_scraper import get_reddit_sentiment as reddit_get_sentiment
+from reddit_hybrid import get_reddit_sentiment
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Email, To, Content
 from dotenv import load_dotenv
@@ -269,10 +269,6 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             'source': 'N/A'
         }
 
-
-def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
-    """Get Reddit sentiment using JSON endpoints (no API needed)"""
-    return reddit_get_sentiment(ticker)
 
 
 def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
