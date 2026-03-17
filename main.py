@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import anthropic
 import finnhub
-import praw
+from reddit_scraper import get_reddit_sentiment as reddit_get_sentiment
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Email, To, Content
 from dotenv import load_dotenv
@@ -55,9 +55,6 @@ logger.info(f".env file loaded: {env_loaded}")
 # API Clients
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
-REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
-REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET')
-REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
 EMAIL_TO = os.getenv('EMAIL_TO')
@@ -67,9 +64,6 @@ EMAIL_FROM = os.getenv('EMAIL_FROM')
 logger.info("Loaded credentials:")
 logger.info(f"  FINNHUB_API_KEY: {FINNHUB_API_KEY[:20] + '...' if FINNHUB_API_KEY else '✗ MISSING'}")
 logger.info(f"  ALPHA_VANTAGE_API_KEY: {ALPHA_VANTAGE_API_KEY[:15] + '...' if ALPHA_VANTAGE_API_KEY else '✗ MISSING'}")
-logger.info(f"  REDDIT_CLIENT_ID: {REDDIT_CLIENT_ID[:15] + '...' if REDDIT_CLIENT_ID else '✗ MISSING'}")
-logger.info(f"  REDDIT_CLIENT_SECRET: {REDDIT_CLIENT_SECRET[:15] + '...' if REDDIT_CLIENT_SECRET else '✗ MISSING'}")
-logger.info(f"  REDDIT_USER_AGENT: {REDDIT_USER_AGENT if REDDIT_USER_AGENT else '✗ MISSING'}")
 logger.info(f"  ANTHROPIC_API_KEY: {ANTHROPIC_API_KEY[:20] + '...' if ANTHROPIC_API_KEY else '✗ MISSING'}")
 logger.info(f"  SENDGRID_API_KEY: {SENDGRID_API_KEY[:20] + '...' if SENDGRID_API_KEY else '✗ MISSING'}")
 logger.info(f"  EMAIL_FROM: {EMAIL_FROM}")
@@ -276,48 +270,9 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
         }
 
 
-def get_reddit_sentiment(ticker: str, reddit_client) -> Tuple[int, str]:
-    """Search Reddit for ticker mentions and determine sentiment"""
-    try:
-        subreddits = ['wallstreetbets', 'stocks', 'investing', 'CanadianInvestor']
-        mentions = 0
-        posts = []
-
-        for sub_name in subreddits:
-            try:
-                subreddit = reddit_client.subreddit(sub_name)
-                # Search last 24 hours
-                for post in subreddit.search(ticker, time_filter='day', limit=10):
-                    mentions += 1
-                    posts.append({
-                        'title': post.title,
-                        'score': post.score,
-                        'upvote_ratio': post.upvote_ratio
-                    })
-            except Exception as e:
-                logger.warning(f"Error searching r/{sub_name} for {ticker}: {e}")
-                continue
-
-        if mentions == 0:
-            return 0, "No Reddit activity"
-
-        # Determine sentiment from top 3 posts
-        top_posts = sorted(posts, key=lambda x: x['score'], reverse=True)[:3]
-        avg_ratio = sum(p['upvote_ratio'] for p in top_posts) / len(top_posts)
-
-        # Simple sentiment based on upvote ratio
-        if avg_ratio >= 0.7:
-            sentiment = "BULLISH"
-        elif avg_ratio <= 0.5:
-            sentiment = "BEARISH"
-        else:
-            sentiment = "NEUTRAL"
-
-        return mentions, f"{mentions} mentions - {sentiment}"
-
-    except Exception as e:
-        logger.error(f"Reddit sentiment error for {ticker}: {e}")
-        return 0, "Reddit unavailable"
+def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
+    """Get Reddit sentiment using JSON endpoints (no API needed)"""
+    return reddit_get_sentiment(ticker)
 
 
 def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
@@ -390,7 +345,7 @@ Start immediately with the first ticker line."""
         return "ANALYSIS_FAILED"
 
 
-def get_trending_tickers(finnhub_client, reddit_client, current_holdings: List[str]) -> List[Dict]:
+def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Dict]:
     """Module 3: Get trending tickers from Finnhub and Reddit"""
     trending = set()
 
@@ -404,21 +359,36 @@ def get_trending_tickers(finnhub_client, reddit_client, current_holdings: List[s
     except Exception as e:
         logger.warning(f"Error fetching Finnhub trending: {e}")
 
-    # Get Reddit trending
+    # Get Reddit trending using JSON endpoints (no API needed)
     try:
+        import requests
         subreddits = ['wallstreetbets', 'stocks', 'investing', 'CanadianInvestor']
         ticker_counts = {}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
         for sub_name in subreddits:
             try:
-                subreddit = reddit_client.subreddit(sub_name)
-                for post in subreddit.hot(limit=30):
-                    # Simple ticker extraction (words in all caps 2-5 chars)
-                    words = post.title.upper().split()
-                    for word in words:
-                        clean_word = ''.join(c for c in word if c.isalpha())
-                        if 2 <= len(clean_word) <= 5 and clean_word.isupper():
-                            ticker_counts[clean_word] = ticker_counts.get(clean_word, 0) + 1
+                # Get hot posts using public JSON endpoint
+                url = f'https://www.reddit.com/r/{sub_name}/hot.json'
+                params = {'limit': 30}
+                response = requests.get(url, headers=headers, params=params, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'data' in data and 'children' in data['data']:
+                        for child in data['data']['children']:
+                            post_data = child.get('data', {})
+                            title = post_data.get('title', '').upper()
+                            
+                            # Simple ticker extraction (words in all caps 2-5 chars)
+                            words = title.split()
+                            for word in words:
+                                clean_word = ''.join(c for c in word if c.isalpha())
+                                if 2 <= len(clean_word) <= 5 and clean_word.isupper():
+                                    ticker_counts[clean_word] = ticker_counts.get(clean_word, 0) + 1
+                
+                time.sleep(1)  # Be nice to Reddit
+                
             except Exception as e:
                 logger.warning(f"Error getting hot posts from r/{sub_name}: {e}")
                 continue
@@ -428,6 +398,7 @@ def get_trending_tickers(finnhub_client, reddit_client, current_holdings: List[s
         trending.update([t[0] for t in top_mentioned])
 
     except Exception as e:
+        logger.error(f"Error getting Reddit trending: {e}")
         logger.error(f"Error getting Reddit trending: {e}")
 
     # Remove tickers already in holdings
@@ -1118,13 +1089,9 @@ def run_portfolio_analysis():
     macro_context = get_macro_context(date_str)
 
     # Initialize API clients
+        # Reddit no longer needs initialization - using public JSON endpoints
     try:
         finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
-        reddit_client = praw.Reddit(
-            client_id=REDDIT_CLIENT_ID,
-            client_secret=REDDIT_CLIENT_SECRET,
-            user_agent=REDDIT_USER_AGENT
-        )
     except Exception as e:
         logger.error(f"Error initializing API clients: {e}")
         return
@@ -1136,7 +1103,7 @@ def run_portfolio_analysis():
         data = fetch_ticker_data(ticker, finnhub_client)
         if data:
             # Add Reddit sentiment
-            mentions, sentiment = get_reddit_sentiment(ticker, reddit_client)
+            mentions, sentiment = get_reddit_sentiment(ticker)
             data['reddit_sentiment'] = sentiment
             holdings_data.append(data)
         else:
@@ -1162,7 +1129,7 @@ def run_portfolio_analysis():
 
     # Step 5: Find new opportunities
     logger.info("Finding new opportunities...")
-    trending_data = get_trending_tickers(finnhub_client, reddit_client, holdings)
+    trending_data = get_trending_tickers(finnhub_client, holdings)
     opportunities_text = find_opportunities(trending_data)
 
     # DEBUG: Log Claude's raw response for opportunities
