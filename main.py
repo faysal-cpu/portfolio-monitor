@@ -105,12 +105,22 @@ def get_stocktwits_sentiment(ticker: str) -> Tuple[str, int]:
     try:
         # StockTwits public API endpoint
         url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+        }
 
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
+
+        logger.info(f"StockTwits API for {ticker}: Status {response.status_code}")
 
         if response.status_code == 200:
             data = response.json()
+
+            # Check for errors in response
+            if 'errors' in data:
+                logger.warning(f"StockTwits API error for {ticker}: {data['errors']}")
+                return "Low activity", 0
 
             if 'messages' in data and data['messages']:
                 messages = data['messages'][:20]  # Check last 20 messages
@@ -121,7 +131,7 @@ def get_stocktwits_sentiment(ticker: str) -> Tuple[str, int]:
                 bearish = sum(1 for m in messages if m.get('entities', {}).get('sentiment', {}).get('basic') == 'Bearish')
 
                 if bullish + bearish == 0:
-                    return f"{message_count} msgs - No clear sentiment", message_count
+                    return f"{message_count} msgs", message_count
 
                 bullish_pct = (bullish / (bullish + bearish)) * 100
 
@@ -134,13 +144,24 @@ def get_stocktwits_sentiment(ticker: str) -> Tuple[str, int]:
 
                 return sentiment, message_count
             else:
-                return "No StockTwits activity", 0
+                logger.info(f"No messages found for {ticker} on StockTwits")
+                return "Low activity", 0
+        elif response.status_code == 429:
+            logger.warning(f"StockTwits rate limit hit for {ticker}")
+            return "Rate limited", 0
+        elif response.status_code == 404:
+            logger.info(f"Ticker {ticker} not found on StockTwits")
+            return "Not tracked", 0
         else:
-            return "StockTwits unavailable", 0
+            logger.warning(f"StockTwits returned {response.status_code} for {ticker}")
+            return "Unavailable", 0
 
+    except requests.exceptions.Timeout:
+        logger.warning(f"StockTwits timeout for {ticker}")
+        return "Timeout", 0
     except Exception as e:
-        logger.warning(f"StockTwits error for {ticker}: {e}")
-        return "StockTwits unavailable", 0
+        logger.warning(f"StockTwits exception for {ticker}: {type(e).__name__} - {e}")
+        return "Error", 0
 
 
 def read_holdings() -> List[str]:
@@ -215,6 +236,7 @@ def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
                             'price': price,
                             'change_percent': change_percent,
                             'headlines': [],
+                            'news_sentiment': 'N/A',
                             'source': 'Alpha Vantage'
                         }
 
@@ -253,7 +275,8 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
         # Calculate news sentiment from Finnhub news data
         news_sentiment = "N/A"
         if news:
-            sentiments = [article.get('sentiment', 0) for article in news[:10] if 'sentiment' in article]
+            # Finnhub may or may not include sentiment field - use it if available
+            sentiments = [article.get('sentiment', 0) for article in news[:10] if 'sentiment' in article and article.get('sentiment') != 0]
             if sentiments:
                 avg_sentiment = sum(sentiments) / len(sentiments)
                 if avg_sentiment > 0.15:
@@ -262,6 +285,9 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                     news_sentiment = f"📉 Negative ({avg_sentiment:.2f})"
                 else:
                     news_sentiment = f"Neutral ({avg_sentiment:.2f})"
+            elif len(news) >= 3:
+                # If sentiment field not available, just indicate news volume
+                news_sentiment = f"{len(news)} articles"
 
         time.sleep(0.1)  # Rate limiting
 
@@ -280,8 +306,9 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             logger.warning(f"No price data from Finnhub for {ticker}, trying Alpha Vantage...")
             av_data = fetch_alpha_vantage_data(ticker)
             if av_data:
-                # Keep Finnhub news if available
+                # Keep Finnhub news and sentiment if available
                 av_data['headlines'] = headlines
+                av_data['news_sentiment'] = news_sentiment
                 return av_data
             else:
                 # Both APIs failed, return ticker with N/A data
@@ -291,6 +318,7 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                     'price': None,
                     'change_percent': None,
                     'headlines': headlines,
+                    'news_sentiment': news_sentiment,
                     'source': 'N/A'
                 }
 
@@ -308,6 +336,7 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                         'price': quote.get('c', 0),
                         'change_percent': quote.get('dp', 0),
                         'headlines': [],
+                        'news_sentiment': 'N/A',
                         'source': 'Finnhub'
                     }
             except:
@@ -325,6 +354,7 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             'price': None,
             'change_percent': None,
             'headlines': [],
+            'news_sentiment': 'N/A',
             'source': 'N/A'
         }
 
@@ -441,6 +471,13 @@ def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Di
 
     logger.info(f"Recently recommended (excluding): {recently_recommended_tickers}")
 
+    # Fallback: Popular tickers to ensure we always have some candidates
+    fallback_tickers = [
+        'NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'AMD', 'PLTR', 'COIN',
+        'SHOP', 'SQ', 'SNOW', 'NET', 'CRWD', 'ZS', 'DDOG', 'MDB', 'U', 'RBLX',
+        'LMT', 'RTX', 'BA', 'GD', 'NOC', 'FCX', 'NEM', 'GOLD', 'WPM', 'AEM'
+    ]
+
     # Source 1: Market Movers - Top Gainers
     try:
         from datetime import datetime
@@ -530,6 +567,15 @@ Return ONLY a comma-separated list of ticker symbols. No explanations."""
     # Remove tickers already in holdings or recently recommended
     trending = trending - set(current_holdings) - recently_recommended_tickers
 
+    # If we don't have enough trending tickers, add from fallback list
+    if len(trending) < 15:
+        logger.warning(f"Only found {len(trending)} trending tickers, adding from fallback list")
+        fallback_available = [t for t in fallback_tickers if t not in current_holdings and t not in recently_recommended_tickers]
+        import random
+        random.shuffle(fallback_available)
+        trending.update(fallback_available[:20])
+        logger.info(f"After fallback: {len(trending)} tickers to check")
+
     # Fetch data for trending tickers
     trending_data = []
     for ticker in list(trending)[:30]:  # Check more tickers to get 5 good ones
@@ -540,6 +586,18 @@ Return ONLY a comma-separated list of ticker symbols. No explanations."""
                 break
 
     logger.info(f"Collected {len(trending_data)} trending candidates for opportunities")
+
+    # Final fallback: if still no data, use popular stocks
+    if len(trending_data) == 0:
+        logger.error("No trending data collected! Using emergency fallback")
+        fallback_available = [t for t in fallback_tickers[:10] if t not in current_holdings]
+        for ticker in fallback_available:
+            data = fetch_ticker_data(ticker, finnhub_client)
+            if data:
+                trending_data.append(data)
+                if len(trending_data) >= 10:
+                    break
+
     return trending_data
 
 
@@ -1257,10 +1315,11 @@ def run_portfolio_analysis():
     for ticker in holdings:
         data = fetch_ticker_data(ticker, finnhub_client)
         if data:
-            # Add StockTwits sentiment
+            # Add StockTwits sentiment (with delay to avoid rate limits)
             sentiment, msg_count = get_stocktwits_sentiment(ticker)
             data['social_sentiment'] = sentiment
             holdings_data.append(data)
+            time.sleep(0.5)  # Rate limiting for StockTwits API
         else:
             logger.warning(f"Skipping {ticker} due to data fetch error")
 
