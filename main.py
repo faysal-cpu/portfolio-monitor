@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import anthropic
 import finnhub
-from reddit_hybrid import get_reddit_sentiment
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Email, To, Content
 from dotenv import load_dotenv
@@ -96,6 +95,52 @@ def git_pull_updates():
             logger.warning(f"Git pull failed: {result.stderr.strip()}")
     except Exception as e:
         logger.error(f"Git pull error: {e} - Continuing with existing files")
+
+
+def get_stocktwits_sentiment(ticker: str) -> Tuple[str, int]:
+    """
+    Fetch sentiment from StockTwits API (free, no key required for basic access)
+    Returns: (sentiment_text, message_count)
+    """
+    try:
+        # StockTwits public API endpoint
+        url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+
+            if 'messages' in data and data['messages']:
+                messages = data['messages'][:20]  # Check last 20 messages
+                message_count = len(messages)
+
+                # Count sentiment
+                bullish = sum(1 for m in messages if m.get('entities', {}).get('sentiment', {}).get('basic') == 'Bullish')
+                bearish = sum(1 for m in messages if m.get('entities', {}).get('sentiment', {}).get('basic') == 'Bearish')
+
+                if bullish + bearish == 0:
+                    return f"{message_count} msgs - No clear sentiment", message_count
+
+                bullish_pct = (bullish / (bullish + bearish)) * 100
+
+                if bullish_pct >= 65:
+                    sentiment = f"{message_count} msgs - 🚀 BULLISH ({bullish_pct:.0f}%)"
+                elif bullish_pct <= 35:
+                    sentiment = f"{message_count} msgs - 📉 BEARISH ({100-bullish_pct:.0f}%)"
+                else:
+                    sentiment = f"{message_count} msgs - NEUTRAL"
+
+                return sentiment, message_count
+            else:
+                return "No StockTwits activity", 0
+        else:
+            return "StockTwits unavailable", 0
+
+    except Exception as e:
+        logger.warning(f"StockTwits error for {ticker}: {e}")
+        return "StockTwits unavailable", 0
 
 
 def read_holdings() -> List[str]:
@@ -202,8 +247,21 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             to=end_date.strftime('%Y-%m-%d')
         )
 
-        # Get top 3 headlines
+        # Get top 3 headlines and calculate sentiment
         headlines = [article.get('headline', '') for article in news[:3]]
+
+        # Calculate news sentiment from Finnhub news data
+        news_sentiment = "N/A"
+        if news:
+            sentiments = [article.get('sentiment', 0) for article in news[:10] if 'sentiment' in article]
+            if sentiments:
+                avg_sentiment = sum(sentiments) / len(sentiments)
+                if avg_sentiment > 0.15:
+                    news_sentiment = f"📈 Positive ({avg_sentiment:.2f})"
+                elif avg_sentiment < -0.15:
+                    news_sentiment = f"📉 Negative ({avg_sentiment:.2f})"
+                else:
+                    news_sentiment = f"Neutral ({avg_sentiment:.2f})"
 
         time.sleep(0.1)  # Rate limiting
 
@@ -214,6 +272,7 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                 'price': current_price,
                 'change_percent': change_percent,
                 'headlines': headlines,
+                'news_sentiment': news_sentiment,
                 'source': 'Finnhub'
             }
         else:
@@ -296,7 +355,8 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
                 holdings_text += f"  Day Change: N/A\n"
 
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
-            holdings_text += f"  Reddit: {data.get('reddit_sentiment', 'N/A')}\n"
+            holdings_text += f"  News Sentiment: {data.get('news_sentiment', 'N/A')}\n"
+            holdings_text += f"  Social Sentiment: {data.get('social_sentiment', 'N/A')}\n"
 
         prompt = f"""You are a decisive portfolio analyst for a Canadian retail investor using a self-directed TFSA. Your job is to SYNTHESIZE all available information and give ONE clear recommendation per stock.
 
@@ -341,79 +401,157 @@ Start immediately with the first ticker line."""
         return "ANALYSIS_FAILED"
 
 
+def load_recommendation_cache() -> Dict:
+    """Load cache of recently recommended stocks to avoid repetition"""
+    cache_file = 'recommendations_cache.json'
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                import json
+                cache = json.load(f)
+                # Clean old entries (older than 14 days)
+                cutoff = (datetime.now() - timedelta(days=14)).isoformat()
+                cache = {k: v for k, v in cache.items() if v > cutoff}
+                return cache
+        return {}
+    except Exception as e:
+        logger.warning(f"Error loading recommendation cache: {e}")
+        return {}
+
+
+def save_recommendation_cache(cache: Dict):
+    """Save cache of recently recommended stocks"""
+    cache_file = 'recommendations_cache.json'
+    try:
+        import json
+        with open(cache_file, 'w') as f:
+            json.dump(cache, f, indent=2)
+        logger.info(f"Saved {len(cache)} tickers to recommendation cache")
+    except Exception as e:
+        logger.error(f"Error saving recommendation cache: {e}")
+
+
 def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Dict]:
-    """Module 3: Get trending tickers from Finnhub and Reddit"""
+    """Module 3: Get diverse trending tickers using multiple Finnhub sources"""
     trending = set()
 
-    # Get Finnhub trending
-    try:
-        trending_data = finnhub_client.market_news('general', min_id=0)
-        # Extract tickers mentioned in news
-        for article in trending_data[:20]:
-            # This is a simplified approach - in production you'd parse more carefully
-            pass
-    except Exception as e:
-        logger.warning(f"Error fetching Finnhub trending: {e}")
+    # Load cache of recently recommended stocks
+    recent_recommendations = load_recommendation_cache()
+    recently_recommended_tickers = set(recent_recommendations.keys())
 
-    # Get Reddit trending using JSON endpoints (no API needed)
-    try:
-        import requests
-        subreddits = ['wallstreetbets', 'stocks', 'investing', 'CanadianInvestor']
-        ticker_counts = {}
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    logger.info(f"Recently recommended (excluding): {recently_recommended_tickers}")
 
-        for sub_name in subreddits:
+    # Source 1: Market Movers - Top Gainers
+    try:
+        from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+        market_movers = finnhub_client.stock_symbols('US')
+
+        # Get price data for random sample of US stocks to find movers
+        import random
+        sample_tickers = random.sample([s['symbol'] for s in market_movers if s.get('type') == 'Common Stock'], min(50, len(market_movers)))
+
+        movers = []
+        for ticker in sample_tickers:
             try:
-                # Get hot posts using public JSON endpoint
-                url = f'https://www.reddit.com/r/{sub_name}/hot.json'
-                params = {'limit': 30}
-                response = requests.get(url, headers=headers, params=params, timeout=10)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'data' in data and 'children' in data['data']:
-                        for child in data['data']['children']:
-                            post_data = child.get('data', {})
-                            title = post_data.get('title', '').upper()
-                            
-                            # Simple ticker extraction (words in all caps 2-5 chars)
-                            words = title.split()
-                            for word in words:
-                                clean_word = ''.join(c for c in word if c.isalpha())
-                                if 2 <= len(clean_word) <= 5 and clean_word.isupper():
-                                    ticker_counts[clean_word] = ticker_counts.get(clean_word, 0) + 1
-                
-                time.sleep(1)  # Be nice to Reddit
-                
-            except Exception as e:
-                logger.warning(f"Error getting hot posts from r/{sub_name}: {e}")
+                quote = finnhub_client.quote(ticker)
+                change_pct = quote.get('dp', 0)
+                if abs(change_pct) > 5:  # Moved more than 5%
+                    movers.append(ticker)
+                    if len(movers) >= 10:
+                        break
+                time.sleep(0.1)
+            except:
                 continue
 
-        # Get top 30 mentioned
-        top_mentioned = sorted(ticker_counts.items(), key=lambda x: x[1], reverse=True)[:30]
-        trending.update([t[0] for t in top_mentioned])
-
+        trending.update(movers)
+        logger.info(f"Found {len(movers)} market movers")
     except Exception as e:
-        logger.error(f"Error getting Reddit trending: {e}")
-        logger.error(f"Error getting Reddit trending: {e}")
+        logger.warning(f"Error fetching market movers: {e}")
 
-    # Remove tickers already in holdings
-    trending = trending - set(current_holdings)
+    # Source 2: Finnhub Market News - Extract mentioned tickers
+    try:
+        news = finnhub_client.general_news('general', min_id=0)
+        ticker_mentions = {}
+
+        for article in news[:50]:
+            # Look for ticker patterns in headlines and summaries
+            text = f"{article.get('headline', '')} {article.get('summary', '')}".upper()
+            # Extract potential tickers (2-5 letter uppercase words with $ prefix or standalone)
+            import re
+            potential_tickers = re.findall(r'\$([A-Z]{2,5})\b|\b([A-Z]{2,5})\b', text)
+            for match in potential_tickers:
+                ticker = match[0] or match[1]
+                if ticker and len(ticker) >= 2:
+                    ticker_mentions[ticker] = ticker_mentions.get(ticker, 0) + 1
+
+        # Get top 15 most mentioned
+        top_news_tickers = sorted(ticker_mentions.items(), key=lambda x: x[1], reverse=True)[:15]
+        trending.update([t[0] for t in top_news_tickers])
+        logger.info(f"Found {len(top_news_tickers)} tickers from news")
+    except Exception as e:
+        logger.warning(f"Error extracting tickers from news: {e}")
+
+    # Source 3: Ask Claude for trending stocks based on today's market context
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        today_str = datetime.now().strftime('%B %d, %Y')
+
+        prompt = f"""Today is {today_str}. Search for and identify 10 stocks that are trending or have interesting catalysts TODAY. Focus on:
+- Stocks with significant news or events today
+- High-growth tech, defense, AI, commodities, or small-cap momentum plays
+- Canadian (TSX) or US stocks
+- Exclude: {', '.join(current_holdings)}
+- Exclude recently recommended: {', '.join(recently_recommended_tickers)}
+
+Return ONLY a comma-separated list of ticker symbols. No explanations."""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            temperature=0.7,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{"type": "web_search_20250305", "name": "web_search"}]
+        )
+
+        response_text = ""
+        for block in message.content:
+            if hasattr(block, 'text'):
+                response_text += block.text
+
+        # Parse tickers from response
+        import re
+        claude_tickers = re.findall(r'\b[A-Z]{2,5}\b', response_text)
+        trending.update(claude_tickers[:10])
+        logger.info(f"Claude suggested {len(claude_tickers)} trending tickers")
+    except Exception as e:
+        logger.warning(f"Error getting Claude trending suggestions: {e}")
+
+    # Remove tickers already in holdings or recently recommended
+    trending = trending - set(current_holdings) - recently_recommended_tickers
 
     # Fetch data for trending tickers
     trending_data = []
-    for ticker in list(trending)[:20]:  # Limit to 20 to avoid rate limits
+    for ticker in list(trending)[:30]:  # Check more tickers to get 5 good ones
         data = fetch_ticker_data(ticker, finnhub_client)
-        if data:
+        if data and data.get('price'):  # Only include if we got valid price data
             trending_data.append(data)
+            if len(trending_data) >= 20:  # Get 20 candidates for Claude to pick from
+                break
 
+    logger.info(f"Collected {len(trending_data)} trending candidates for opportunities")
     return trending_data
 
 
-def find_opportunities(trending_data: List[Dict]) -> str:
-    """Get Claude's recommendations for new opportunities"""
+def find_opportunities(trending_data: List[Dict]) -> Tuple[str, List[str]]:
+    """Get Claude's recommendations for new opportunities
+    Returns: (response_text, list_of_recommended_tickers)"""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        # Load recent recommendations to tell Claude
+        recent_cache = load_recommendation_cache()
+        recent_list = list(recent_cache.keys())
 
         # Format trending data
         trending_text = ""
@@ -428,17 +566,25 @@ def find_opportunities(trending_data: List[Dict]) -> str:
             if data.get('headlines'):
                 trending_text += f"  News: {'; '.join(data['headlines'][:2])}\n"
 
+        recent_str = f"\nRECENTLY RECOMMENDED (DO NOT REPEAT): {', '.join(recent_list)}\n" if recent_list else ""
+
+        today = datetime.now().strftime('%B %d, %Y')
+
         prompt = f"""CRITICAL: Respond ONLY with pipe-delimited lines. NO explanatory text. NO preamble. NO markdown. NO introductions.
 
-Investor profile: Canadian TFSA, momentum plays, binary catalysts, defence, AI, commodities, small caps. Somewhat risk tolerant.
+Today is {today}.
 
+Investor profile: Canadian TFSA, momentum plays, binary catalysts, defence, AI, commodities, small caps. Somewhat risk tolerant.
+{recent_str}
 TRENDING TICKERS:
 {trending_text}
+
+⚠️ IMPORTANT: Pick 5 DIFFERENT stocks that have NOT been recommended recently. Prioritize variety and fresh ideas.
 
 Output EXACTLY 5 lines in this format:
 TICKER|COMPANY|WHY TODAY|UPSIDE|RISK|EXCHANGE
 
-WHY TODAY: be specific about why this is relevant TODAY (max 15 words)
+WHY TODAY: be specific about why this is relevant TODAY, not generic (max 15 words)
 UPSIDE: HIGH or MEDIUM
 RISK: one key warning (max 10 words)
 EXCHANGE: TSX or US
@@ -448,17 +594,30 @@ Start immediately with the first ticker line. Nothing else."""
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
-            temperature=0.3,
+            temperature=0.5,  # Increased temperature for more variety
             messages=[{"role": "user", "content": prompt}]
         )
 
         response = message.content[0].text
         logger.info("Successfully found opportunities with Claude")
-        return response
+
+        # Extract recommended tickers from response
+        import re
+        lines = response.strip().split('\n')
+        recommended_tickers = []
+        for line in lines:
+            if '|' in line:
+                parts = line.split('|')
+                if len(parts) >= 1:
+                    ticker = parts[0].strip().upper()
+                    if ticker and ticker != "TICKER":
+                        recommended_tickers.append(ticker)
+
+        return response, recommended_tickers
 
     except Exception as e:
         logger.error(f"Error finding opportunities: {e}")
-        return "OPPORTUNITIES_UNAVAILABLE"
+        return "OPPORTUNITIES_UNAVAILABLE", []
 
 
 def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Dict]:
@@ -476,7 +635,7 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
                 'confidence': 'N/A',
                 'reason': 'Analysis failed',
                 'risk': 'See logs',
-                'reddit': data.get('reddit_sentiment', 'N/A')
+                'social_sentiment': data.get('social_sentiment', 'N/A')
             })
         return parsed
 
@@ -508,7 +667,7 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
                         'confidence': parts[2].strip(),
                         'reason': parts[3].strip(),
                         'risk': parts[4].strip() if len(parts) > 4 else 'N/A',
-                        'reddit': data_map[ticker_upper].get('reddit_sentiment', 'N/A')
+                        'social_sentiment': data_map[ticker_upper].get('social_sentiment', 'N/A')
                     })
                     parsed_tickers.add(ticker_upper)
                 else:
@@ -906,7 +1065,8 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
                 </div>
                 <div class="stock-detail"><strong>Reason:</strong> {h['reason']}</div>
                 <div class="stock-detail"><strong>Risk:</strong> {h['risk']}</div>
-                <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>Reddit:</strong> {h['reddit']}</div>
+                <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>News Sentiment:</strong> {h.get('news_sentiment', 'N/A')}</div>
+                <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>Social Buzz:</strong> {h.get('social_sentiment', 'N/A')}</div>
             </div>
 """
 
@@ -970,7 +1130,7 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         plain += f"  Recommendation: {h.get('recommendation', 'N/A')} ({h.get('confidence', 'N/A')} confidence)\n"
         plain += f"  Reason: {h.get('reason', 'N/A')}\n"
         plain += f"  Risk: {h.get('risk', 'N/A')}\n"
-        plain += f"  Reddit: {h.get('reddit', 'N/A')}\n"
+        plain += f"  Social Buzz: {h.get('social_sentiment', 'N/A')}\n"
 
     if opportunities:
         plain += "\n=== OPPORTUNITIES ===\n"
@@ -1085,7 +1245,6 @@ def run_portfolio_analysis():
     macro_context = get_macro_context(date_str)
 
     # Initialize API clients
-        # Reddit no longer needs initialization - using public JSON endpoints
     try:
         finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
     except Exception as e:
@@ -1098,9 +1257,9 @@ def run_portfolio_analysis():
     for ticker in holdings:
         data = fetch_ticker_data(ticker, finnhub_client)
         if data:
-            # Add Reddit sentiment
-            mentions, sentiment = get_reddit_sentiment(ticker)
-            data['reddit_sentiment'] = sentiment
+            # Add StockTwits sentiment
+            sentiment, msg_count = get_stocktwits_sentiment(ticker)
+            data['social_sentiment'] = sentiment
             holdings_data.append(data)
         else:
             logger.warning(f"Skipping {ticker} due to data fetch error")
@@ -1126,7 +1285,7 @@ def run_portfolio_analysis():
     # Step 5: Find new opportunities
     logger.info("Finding new opportunities...")
     trending_data = get_trending_tickers(finnhub_client, holdings)
-    opportunities_text = find_opportunities(trending_data)
+    opportunities_text, recommended_tickers = find_opportunities(trending_data)
 
     # DEBUG: Log Claude's raw response for opportunities
     logger.info("="*60)
@@ -1137,6 +1296,15 @@ def run_portfolio_analysis():
     logger.info("="*60)
 
     parsed_opportunities = parse_opportunities(opportunities_text)
+
+    # Update recommendation cache with new recommendations
+    if recommended_tickers:
+        cache = load_recommendation_cache()
+        today = datetime.now().isoformat()
+        for ticker in recommended_tickers:
+            cache[ticker] = today
+        save_recommendation_cache(cache)
+        logger.info(f"Added {len(recommended_tickers)} tickers to recommendation cache")
 
     # Validation: Check if parsing succeeded
     if len(parsed_holdings) == 0:
