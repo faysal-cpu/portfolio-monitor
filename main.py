@@ -18,6 +18,7 @@ from sendgrid.helpers.mail import Mail, Email, To, Content
 from dotenv import load_dotenv
 import schedule
 import requests
+from reddit_hybrid import get_reddit_sentiment_rss
 
 # Configure logging
 logging.basicConfig(
@@ -97,73 +98,6 @@ def git_pull_updates():
         logger.error(f"Git pull error: {e} - Continuing with existing files")
 
 
-def get_stocktwits_sentiment(ticker: str) -> Tuple[str, int]:
-    """
-    Fetch sentiment from StockTwits API (free, no key required for basic access)
-    Returns: (sentiment_text, message_count)
-    """
-    try:
-        # StockTwits public API endpoint
-        url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json'
-        }
-
-        response = requests.get(url, headers=headers, timeout=15)
-
-        logger.info(f"StockTwits API for {ticker}: Status {response.status_code}")
-
-        if response.status_code == 200:
-            data = response.json()
-
-            # Check for errors in response
-            if 'errors' in data:
-                logger.warning(f"StockTwits API error for {ticker}: {data['errors']}")
-                return "Low activity", 0
-
-            if 'messages' in data and data['messages']:
-                messages = data['messages'][:20]  # Check last 20 messages
-                message_count = len(messages)
-
-                # Count sentiment
-                bullish = sum(1 for m in messages if m.get('entities', {}).get('sentiment', {}).get('basic') == 'Bullish')
-                bearish = sum(1 for m in messages if m.get('entities', {}).get('sentiment', {}).get('basic') == 'Bearish')
-
-                if bullish + bearish == 0:
-                    return f"{message_count} msgs", message_count
-
-                bullish_pct = (bullish / (bullish + bearish)) * 100
-
-                if bullish_pct >= 65:
-                    sentiment = f"{message_count} msgs - 🚀 BULLISH ({bullish_pct:.0f}%)"
-                elif bullish_pct <= 35:
-                    sentiment = f"{message_count} msgs - 📉 BEARISH ({100-bullish_pct:.0f}%)"
-                else:
-                    sentiment = f"{message_count} msgs - NEUTRAL"
-
-                return sentiment, message_count
-            else:
-                logger.info(f"No messages found for {ticker} on StockTwits")
-                return "Low activity", 0
-        elif response.status_code == 429:
-            logger.warning(f"StockTwits rate limit hit for {ticker}")
-            return "Rate limited", 0
-        elif response.status_code == 404:
-            logger.info(f"Ticker {ticker} not found on StockTwits")
-            return "Not tracked", 0
-        else:
-            logger.warning(f"StockTwits returned {response.status_code} for {ticker}")
-            return "Unavailable", 0
-
-    except requests.exceptions.Timeout:
-        logger.warning(f"StockTwits timeout for {ticker}")
-        return "Timeout", 0
-    except Exception as e:
-        logger.warning(f"StockTwits exception for {ticker}: {type(e).__name__} - {e}")
-        return "Error", 0
-
-
 def read_holdings() -> List[str]:
     """Read ticker symbols from holdings.txt"""
     try:
@@ -174,6 +108,52 @@ def read_holdings() -> List[str]:
     except Exception as e:
         logger.error(f"Error reading holdings.txt: {e}")
         return []
+
+
+def analyze_news_sentiment(ticker: str, headlines: List[str]) -> str:
+    """Use Claude AI to analyze news sentiment from headlines"""
+    if not headlines or not ANTHROPIC_API_KEY:
+        return "N/A"
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        headlines_text = "\n".join([f"- {h}" for h in headlines if h])
+        if not headlines_text:
+            return "N/A"
+
+        prompt = f"""Analyze the sentiment of these recent news headlines for {ticker}:
+
+{headlines_text}
+
+Respond with ONLY ONE of these exact formats:
+- "📈 Positive" (if clearly bullish/good news)
+- "📉 Negative" (if clearly bearish/bad news)
+- "Neutral" (if mixed or neutral)
+
+Keep it brief - just the sentiment label."""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=50,
+            temperature=0.1,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        response_text = ""
+        for block in message.content:
+            if hasattr(block, 'text'):
+                response_text += block.text.strip()
+
+        if response_text:
+            logger.info(f"News sentiment for {ticker}: {response_text}")
+            return response_text
+        else:
+            return "N/A"
+
+    except Exception as e:
+        logger.warning(f"Error analyzing news sentiment for {ticker}: {e}")
+        return "N/A"
 
 
 def get_macro_context(date_str: str) -> str:
@@ -272,22 +252,24 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
         # Get top 3 headlines and calculate sentiment
         headlines = [article.get('headline', '') for article in news[:3]]
 
-        # Calculate news sentiment from Finnhub news data
+        # Use Claude AI to analyze news sentiment
         news_sentiment = "N/A"
-        if news:
-            # Finnhub may or may not include sentiment field - use it if available
-            sentiments = [article.get('sentiment', 0) for article in news[:10] if 'sentiment' in article and article.get('sentiment') != 0]
-            if sentiments:
-                avg_sentiment = sum(sentiments) / len(sentiments)
-                if avg_sentiment > 0.15:
-                    news_sentiment = f"📈 Positive ({avg_sentiment:.2f})"
-                elif avg_sentiment < -0.15:
-                    news_sentiment = f"📉 Negative ({avg_sentiment:.2f})"
-                else:
-                    news_sentiment = f"Neutral ({avg_sentiment:.2f})"
-            elif len(news) >= 3:
-                # If sentiment field not available, just indicate news volume
-                news_sentiment = f"{len(news)} articles"
+        if headlines:
+            # Try using Claude to analyze the headlines
+            news_sentiment = analyze_news_sentiment(ticker, headlines)
+            # Fallback: if Claude fails, check if Finnhub provides sentiment scores
+            if news_sentiment == "N/A" and news:
+                sentiments = [article.get('sentiment', 0) for article in news[:10] if 'sentiment' in article and article.get('sentiment') != 0]
+                if sentiments:
+                    avg_sentiment = sum(sentiments) / len(sentiments)
+                    if avg_sentiment > 0.15:
+                        news_sentiment = f"📈 Positive ({avg_sentiment:.2f})"
+                    elif avg_sentiment < -0.15:
+                        news_sentiment = f"📉 Negative ({avg_sentiment:.2f})"
+                    else:
+                        news_sentiment = f"Neutral ({avg_sentiment:.2f})"
+                elif len(news) >= 3:
+                    news_sentiment = f"{len(news)} articles"
 
         time.sleep(0.1)  # Rate limiting
 
@@ -1315,11 +1297,11 @@ def run_portfolio_analysis():
     for ticker in holdings:
         data = fetch_ticker_data(ticker, finnhub_client)
         if data:
-            # Add StockTwits sentiment (with delay to avoid rate limits)
-            sentiment, msg_count = get_stocktwits_sentiment(ticker)
+            # Add Reddit sentiment (with delay to avoid rate limits)
+            mentions, sentiment = get_reddit_sentiment_rss(ticker)
             data['social_sentiment'] = sentiment
             holdings_data.append(data)
-            time.sleep(0.5)  # Rate limiting for StockTwits API
+            time.sleep(2)  # Rate limiting for Reddit RSS feeds
         else:
             logger.warning(f"Skipping {ticker} due to data fetch error")
 
