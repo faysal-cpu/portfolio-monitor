@@ -17,15 +17,22 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
         subreddits = ['wallstreetbets', 'stocks', 'investing', 'CanadianInvestor']
         mentions = 0
         posts = []
-        
+
+        # Use browser-like headers to avoid 403 errors
         headers = {
-            'User-Agent': 'python:portfolio-monitor:v1.0.0 (by /u/investor)'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         }
-        
+
         for sub_name in subreddits:
             try:
-                # Reddit's public JSON endpoint - just add .json to the URL!
-                url = f'https://www.reddit.com/r/{sub_name}/search.json'
+                # Use old.reddit.com which is less strict about bot detection
+                url = f'https://old.reddit.com/r/{sub_name}/search.json'
                 params = {
                     'q': ticker,
                     'restrict_sr': '1',
@@ -56,12 +63,16 @@ def get_reddit_sentiment(ticker: str) -> Tuple[int, str]:
                                 })
                 elif response.status_code == 429:
                     logger.warning(f"Reddit rate limit hit for r/{sub_name}")
-                    time.sleep(2)
+                    time.sleep(5)
+                    continue
+                elif response.status_code == 403:
+                    logger.warning(f"Reddit blocked request for r/{sub_name} (403 Forbidden)")
+                    time.sleep(5)
                     continue
                 else:
                     logger.warning(f"Reddit returned status {response.status_code} for r/{sub_name}")
-                
-                time.sleep(2)
+
+                time.sleep(3)  # Longer delay to be more respectful
                 
             except Exception as e:
                 logger.warning(f"Error searching r/{sub_name} for {ticker}: {e}")
