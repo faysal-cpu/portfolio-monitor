@@ -18,7 +18,6 @@ from sendgrid.helpers.mail import Mail, Email, To, Content
 from dotenv import load_dotenv
 import schedule
 import requests
-from reddit_scraper import get_reddit_sentiment
 
 # Configure logging
 logging.basicConfig(
@@ -368,7 +367,6 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
 
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
             holdings_text += f"  News Sentiment: {data.get('news_sentiment', 'N/A')}\n"
-            holdings_text += f"  Social Sentiment: {data.get('social_sentiment', 'N/A')}\n"
 
         prompt = f"""You are a decisive portfolio analyst for a Canadian retail investor using a self-directed TFSA. Your job is to SYNTHESIZE all available information and give ONE clear recommendation per stock.
 
@@ -379,7 +377,7 @@ HOLDINGS DATA:
 {holdings_text}
 
 INSTRUCTIONS:
-1. Consider ALL factors: price action, news, Reddit sentiment, macro context
+1. Consider ALL factors: price action, news sentiment, macro context
 2. Weigh the pros and cons of each position
 3. Give ONE clear decisive recommendation - don't hedge
 4. Your analysis should be consistent unless underlying data changes significantly
@@ -676,8 +674,7 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
                 'recommendation': 'N/A',
                 'confidence': 'N/A',
                 'reason': 'Analysis failed',
-                'risk': 'See logs',
-                'social_sentiment': data.get('social_sentiment', 'N/A')
+                'risk': 'See logs'
             })
         return parsed
 
@@ -708,8 +705,7 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
                         'recommendation': parts[1].strip(),
                         'confidence': parts[2].strip(),
                         'reason': parts[3].strip(),
-                        'risk': parts[4].strip() if len(parts) > 4 else 'N/A',
-                        'social_sentiment': data_map[ticker_upper].get('social_sentiment', 'N/A')
+                        'risk': parts[4].strip() if len(parts) > 4 else 'N/A'
                     })
                     parsed_tickers.add(ticker_upper)
                 else:
@@ -1108,7 +1104,6 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
                 <div class="stock-detail"><strong>Reason:</strong> {h['reason']}</div>
                 <div class="stock-detail"><strong>Risk:</strong> {h['risk']}</div>
                 <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>News Sentiment:</strong> {h.get('news_sentiment', 'N/A')}</div>
-                <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>Social Buzz:</strong> {h.get('social_sentiment', 'N/A')}</div>
             </div>
 """
 
@@ -1172,7 +1167,6 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         plain += f"  Recommendation: {h.get('recommendation', 'N/A')} ({h.get('confidence', 'N/A')} confidence)\n"
         plain += f"  Reason: {h.get('reason', 'N/A')}\n"
         plain += f"  Risk: {h.get('risk', 'N/A')}\n"
-        plain += f"  Social Buzz: {h.get('social_sentiment', 'N/A')}\n"
 
     if opportunities:
         plain += "\n=== OPPORTUNITIES ===\n"
@@ -1299,11 +1293,8 @@ def run_portfolio_analysis():
     for ticker in holdings:
         data = fetch_ticker_data(ticker, finnhub_client)
         if data:
-            # Add Reddit sentiment (with delay to avoid rate limits)
-            mentions, sentiment = get_reddit_sentiment(ticker)
-            data['social_sentiment'] = sentiment
             holdings_data.append(data)
-            time.sleep(3)  # Rate limiting for Reddit public API
+            time.sleep(0.5)  # Rate limiting
         else:
             logger.warning(f"Skipping {ticker} due to data fetch error")
 
