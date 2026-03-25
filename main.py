@@ -18,7 +18,7 @@ from sendgrid.helpers.mail import Mail, Email, To, Content
 from dotenv import load_dotenv
 import schedule
 import requests
-from reddit_hybrid import get_reddit_sentiment_rss
+from reddit_scraper import get_reddit_sentiment
 
 # Configure logging
 logging.basicConfig(
@@ -1298,10 +1298,10 @@ def run_portfolio_analysis():
         data = fetch_ticker_data(ticker, finnhub_client)
         if data:
             # Add Reddit sentiment (with delay to avoid rate limits)
-            mentions, sentiment = get_reddit_sentiment_rss(ticker)
+            mentions, sentiment = get_reddit_sentiment(ticker)
             data['social_sentiment'] = sentiment
             holdings_data.append(data)
-            time.sleep(2)  # Rate limiting for Reddit RSS feeds
+            time.sleep(3)  # Rate limiting for Reddit public API
         else:
             logger.warning(f"Skipping {ticker} due to data fetch error")
 
