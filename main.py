@@ -384,6 +384,8 @@ INSTRUCTIONS:
 3. Give ONE clear decisive recommendation - don't hedge
 4. Your analysis should be consistent unless underlying data changes significantly
 5. Be direct and opinionated - if you say HOLD, mean it. If you say SELL, mean it.
+6. Provide DETAILED reasoning - explain the full context and logic behind your recommendation
+7. Be specific about risks - don't just say "volatility", explain what specific event or factor creates the risk
 
 CRITICAL: Output ONLY pipe-delimited lines. NO explanatory text. NO preamble.
 
@@ -392,14 +394,14 @@ TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK
 
 RECOMMENDATION: BUY MORE, HOLD, SELL, or WATCH
 CONFIDENCE: HIGH, MEDIUM, or LOW
-REASON: Specific catalyst or data point (max 30 words)
-RISK: Key risk to watch (max 15 words)
+REASON: Detailed explanation of your recommendation including specific catalysts, price action, news impact, and sentiment data (50-80 words)
+RISK: Specific risk factors and what could go wrong with this position (30-50 words)
 
 Start immediately with the first ticker line."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=3000,
+            max_tokens=5000,
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -624,16 +626,16 @@ TRENDING TICKERS:
 Output EXACTLY 5 lines in this format:
 TICKER|COMPANY|WHY TODAY|UPSIDE|RISK|EXCHANGE
 
-WHY TODAY: be specific about why this is relevant TODAY, not generic (max 15 words)
+WHY TODAY: Detailed explanation of why this stock is relevant TODAY - include specific catalysts, news, or market conditions (40-60 words)
 UPSIDE: HIGH or MEDIUM
-RISK: one key warning (max 10 words)
+RISK: Specific risk factors and concerns - be detailed about what could go wrong (25-40 words)
 EXCHANGE: TSX or US
 
 Start immediately with the first ticker line. Nothing else."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+            max_tokens=3500,
             temperature=0.5,  # Increased temperature for more variety
             messages=[{"role": "user", "content": prompt}]
         )
