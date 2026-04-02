@@ -2295,32 +2295,39 @@ def run_spending_analysis():
         all_transactions = categorizer.categorize_transactions(all_transactions)
         logger.info("✓ Categorization complete\n")
 
-        transactions_by_month = defaultdict(list)
+        # NEW LOGIC: Group by upload batch instead of calendar month
+        # Determine the dominant month (month with most transactions)
+        month_counts = defaultdict(int)
         for tx in all_transactions:
             month_key = (tx.date.year, tx.date.month)
-            transactions_by_month[month_key].append(tx)
+            month_counts[month_key] += 1
 
-        for (year, month), transactions in sorted(transactions_by_month.items()):
-            month_name = datetime(year, month, 1).strftime('%B %Y')
-            logger.info(f"Generating report for {month_name}...")
+        # Find the month with the most transactions
+        dominant_month = max(month_counts.items(), key=lambda x: x[1])[0]
+        year, month = dominant_month
+        month_name = datetime(year, month, 1).strftime('%B %Y')
 
-            # Pass data quality metrics
-            data_quality = {
-                'files_processed': files_processed,
-                'total_found': len(all_transactions),
-                'total_skipped': total_skipped,
-                'source_breakdown': dict(source_counts)
-            }
+        logger.info(f"Generating single report for upload batch (dominant month: {month_name})...")
+        logger.info(f"  Transactions span across {len(month_counts)} month(s): {', '.join(datetime(y, m, 1).strftime('%B %Y') for y, m in sorted(month_counts.keys()))}")
 
-            html_report = generate_html_report(year, month, transactions, data_quality)
+        # Pass data quality metrics
+        data_quality = {
+            'files_processed': files_processed,
+            'total_found': len(all_transactions),
+            'total_skipped': total_skipped,
+            'source_breakdown': dict(source_counts)
+        }
 
-            subject = f"💳 Spending Report — {month_name}"
+        # Generate single report with ALL transactions from this batch
+        html_report = generate_html_report(year, month, all_transactions, data_quality)
 
-            # Check for --skip-email flag
-            if '--skip-email' not in sys.argv:
-                send_email(subject, html_report)
-            else:
-                logger.info(f"✓ Email skipped for {month_name} (--skip-email flag)")
+        subject = f"💳 Spending Report — {month_name}"
+
+        # Check for --skip-email flag
+        if '--skip-email' not in sys.argv:
+            send_email(subject, html_report)
+        else:
+            logger.info(f"✓ Email skipped for {month_name} (--skip-email flag)")
 
         logger.info("\n✓ All done!")
 
