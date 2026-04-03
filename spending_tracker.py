@@ -2295,39 +2295,85 @@ def run_spending_analysis():
         all_transactions = categorizer.categorize_transactions(all_transactions)
         logger.info("✓ Categorization complete\n")
 
-        # NEW LOGIC: Group by upload batch instead of calendar month
-        # Determine the dominant month (month with most transactions)
-        month_counts = defaultdict(int)
+        # Group transactions by month
+        transactions_by_month = defaultdict(list)
         for tx in all_transactions:
             month_key = (tx.date.year, tx.date.month)
-            month_counts[month_key] += 1
+            transactions_by_month[month_key].append(tx)
 
-        # Find the month with the most transactions
-        dominant_month = max(month_counts.items(), key=lambda x: x[1])[0]
-        year, month = dominant_month
-        month_name = datetime(year, month, 1).strftime('%B %Y')
+        # Smart merge: combine months with < 15 transactions into adjacent months
+        MIN_TRANSACTIONS_FOR_REPORT = 15
+        sorted_months = sorted(transactions_by_month.keys())
 
-        logger.info(f"Generating single report for upload batch (dominant month: {month_name})...")
-        logger.info(f"  Transactions span across {len(month_counts)} month(s): {', '.join(datetime(y, m, 1).strftime('%B %Y') for y, m in sorted(month_counts.keys()))}")
+        merged_months = {}
+        skip_months = set()
 
-        # Pass data quality metrics
-        data_quality = {
-            'files_processed': files_processed,
-            'total_found': len(all_transactions),
-            'total_skipped': total_skipped,
-            'source_breakdown': dict(source_counts)
-        }
+        for i, month_key in enumerate(sorted_months):
+            if month_key in skip_months:
+                continue
 
-        # Generate single report with ALL transactions from this batch
-        html_report = generate_html_report(year, month, all_transactions, data_quality)
+            month_txs = transactions_by_month[month_key]
 
-        subject = f"💳 Spending Report — {month_name}"
+            # If this month has enough transactions, keep it as-is
+            if len(month_txs) >= MIN_TRANSACTIONS_FOR_REPORT:
+                merged_months[month_key] = month_txs
+            else:
+                # Small month - merge into adjacent month
+                # Prefer merging forward (into next month) if it exists and is larger
+                merged = False
 
-        # Check for --skip-email flag
-        if '--skip-email' not in sys.argv:
-            send_email(subject, html_report)
-        else:
-            logger.info(f"✓ Email skipped for {month_name} (--skip-email flag)")
+                if i + 1 < len(sorted_months):
+                    next_month = sorted_months[i + 1]
+                    if len(transactions_by_month[next_month]) >= MIN_TRANSACTIONS_FOR_REPORT:
+                        # Merge into next month
+                        year, month = next_month
+                        month_name = datetime(year, month, 1).strftime('%B %Y')
+                        logger.info(f"  Merging {len(month_txs)} transactions from {datetime(month_key[0], month_key[1], 1).strftime('%B %Y')} into {month_name}")
+                        if next_month not in merged_months:
+                            merged_months[next_month] = transactions_by_month[next_month].copy()
+                        merged_months[next_month].extend(month_txs)
+                        skip_months.add(month_key)
+                        merged = True
+
+                # Otherwise merge backward (into previous month) if it exists
+                if not merged and i > 0:
+                    prev_month = sorted_months[i - 1]
+                    if prev_month not in skip_months:
+                        year, month = prev_month
+                        month_name = datetime(year, month, 1).strftime('%B %Y')
+                        logger.info(f"  Merging {len(month_txs)} transactions from {datetime(month_key[0], month_key[1], 1).strftime('%B %Y')} into {month_name}")
+                        if prev_month not in merged_months:
+                            merged_months[prev_month] = transactions_by_month[prev_month].copy()
+                        merged_months[prev_month].extend(month_txs)
+                        skip_months.add(month_key)
+                        merged = True
+
+                # If can't merge (standalone small month), keep it anyway
+                if not merged:
+                    merged_months[month_key] = month_txs
+
+        # Generate reports for each month (after merging)
+        for (year, month), transactions in sorted(merged_months.items()):
+            month_name = datetime(year, month, 1).strftime('%B %Y')
+            logger.info(f"Generating report for {month_name} ({len(transactions)} transactions)...")
+
+            # Pass data quality metrics
+            data_quality = {
+                'files_processed': files_processed,
+                'total_found': len(all_transactions),
+                'total_skipped': total_skipped,
+                'source_breakdown': dict(source_counts)
+            }
+
+            html_report = generate_html_report(year, month, transactions, data_quality)
+
+            subject = f"💳 Spending Report — {month_name}"
+
+            # Check for --skip-email flag
+            if '--skip-email' not in sys.argv:
+                send_email(subject, html_report)
+            else:
+                logger.info(f"✓ Email skipped for {month_name} (--skip-email flag)")
 
         logger.info("\n✓ All done!")
 
