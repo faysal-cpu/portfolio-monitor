@@ -252,24 +252,8 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
         # Get top 3 headlines and calculate sentiment
         headlines = [article.get('headline', '') for article in news[:3]]
 
-        # Use Claude AI to analyze news sentiment
+        # News sentiment disabled - was causing too many API errors
         news_sentiment = "N/A"
-        if headlines:
-            # Try using Claude to analyze the headlines
-            news_sentiment = analyze_news_sentiment(ticker, headlines)
-            # Fallback: if Claude fails, check if Finnhub provides sentiment scores
-            if news_sentiment == "N/A" and news:
-                sentiments = [article.get('sentiment', 0) for article in news[:10] if 'sentiment' in article and article.get('sentiment') != 0]
-                if sentiments:
-                    avg_sentiment = sum(sentiments) / len(sentiments)
-                    if avg_sentiment > 0.15:
-                        news_sentiment = f"📈 Positive ({avg_sentiment:.2f})"
-                    elif avg_sentiment < -0.15:
-                        news_sentiment = f"📉 Negative ({avg_sentiment:.2f})"
-                    else:
-                        news_sentiment = f"Neutral ({avg_sentiment:.2f})"
-                elif len(news) >= 3:
-                    news_sentiment = f"{len(news)} articles"
 
         time.sleep(0.1)  # Rate limiting
 
@@ -1119,7 +1103,6 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
                 </div>
                 <div class="stock-detail"><strong>Reason:</strong> {h['reason']}</div>
                 <div class="stock-detail"><strong>Risk:</strong> {h['risk']}</div>
-                <div class="stock-detail" style="color: #666; font-size: 13px;"><strong>News Sentiment:</strong> {h.get('news_sentiment', 'N/A')}</div>
             </div>
 """
 
