@@ -1368,13 +1368,13 @@ def run_portfolio_analysis():
 
 def schedule_job():
     """Schedule the job to run weekdays at 11am"""
-    logger.info("Scheduler initialized - Running Mon-Fri at 11:00am")
+    logger.info("Scheduler initialized - Running Mon-Fri at 7:00am")
 
-    schedule.every().monday.at("11:00").do(run_portfolio_analysis)
-    schedule.every().tuesday.at("11:00").do(run_portfolio_analysis)
-    schedule.every().wednesday.at("11:00").do(run_portfolio_analysis)
-    schedule.every().thursday.at("11:00").do(run_portfolio_analysis)
-    schedule.every().friday.at("11:00").do(run_portfolio_analysis)
+    schedule.every().monday.at("07:00").do(run_portfolio_analysis)
+    schedule.every().tuesday.at("07:00").do(run_portfolio_analysis)
+    schedule.every().wednesday.at("07:00").do(run_portfolio_analysis)
+    schedule.every().thursday.at("07:00").do(run_portfolio_analysis)
+    schedule.every().friday.at("07:00").do(run_portfolio_analysis)
 
     while True:
         schedule.run_pending()
