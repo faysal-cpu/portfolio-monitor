@@ -134,7 +134,7 @@ Respond with ONLY ONE of these exact formats:
 Keep it brief - just the sentiment label."""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=50,
             temperature=0.1,
             messages=[{"role": "user", "content": prompt}]
@@ -164,7 +164,7 @@ def get_macro_context(date_str: str) -> str:
         prompt = f"""Today is {date_str}. Search for today's most important market news and macro developments. In 3 bullet points, give the most important macro and geopolitical factors a Canadian retail investor should know TODAY that could affect North American and global markets. Be specific — mention actual events, not generic risks."""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=1500,
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}],
@@ -399,7 +399,7 @@ RISK: Specific risk factors and what could go wrong with this position (30-50 wo
 Start immediately with the first ticker line."""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=5000,
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
@@ -527,7 +527,7 @@ def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Di
 Return ONLY a comma-separated list of ticker symbols. No explanations."""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=300,
             temperature=0.7,
             messages=[{"role": "user", "content": prompt}],
@@ -633,7 +633,7 @@ EXCHANGE: TSX or US
 Start immediately with the first ticker line. Nothing else."""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=3500,
             temperature=0.5,  # Increased temperature for more variety
             messages=[{"role": "user", "content": prompt}]
