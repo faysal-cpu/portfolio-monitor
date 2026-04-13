@@ -42,14 +42,13 @@ logger.info(f"Script directory: {script_dir}")
 logger.info(f".env path: {ENV_FILE_PATH}")
 logger.info(f".env file exists: {os.path.exists(ENV_FILE_PATH)}")
 
-if not os.path.exists(ENV_FILE_PATH):
-    logger.error(f"CRITICAL ERROR: .env file not found at {ENV_FILE_PATH}")
-    logger.error("Please create a .env file in the same directory as main.py")
-    sys.exit(1)
-
-# Load the .env file
-env_loaded = load_dotenv(ENV_FILE_PATH, override=True)
-logger.info(f".env file loaded: {env_loaded}")
+# Load .env file if it exists (for local dev), otherwise use Railway/cloud environment variables
+if os.path.exists(ENV_FILE_PATH):
+    env_loaded = load_dotenv(ENV_FILE_PATH, override=True)
+    logger.info(f".env file loaded: {env_loaded}")
+else:
+    logger.info("No .env file found - using environment variables from Railway/cloud platform")
+    load_dotenv()  # Still call load_dotenv() in case variables are set elsewhere
 
 # API Clients
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
@@ -72,10 +71,12 @@ logger.info("="*60)
 # Validate critical credentials
 if not EMAIL_FROM or not EMAIL_TO or not SENDGRID_API_KEY:
     logger.error("CRITICAL: Missing required email credentials!")
-    logger.error("Please ensure your .env file has:")
+    logger.error("Please ensure you have set these environment variables:")
     logger.error("  SENDGRID_API_KEY=SG.your_sendgrid_api_key")
     logger.error("  EMAIL_FROM=your_sender@example.com")
     logger.error("  EMAIL_TO=your_recipient@example.com")
+    logger.error("On Railway: Set these in the Variables tab")
+    logger.error("Locally: Add them to your .env file")
     sys.exit(1)
 
 
