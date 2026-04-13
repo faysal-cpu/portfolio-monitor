@@ -1052,11 +1052,26 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
     # Process macro context: strip intro, convert markdown, add line breaks
     import re
     processed_macro = macro_context
-    # Strip everything before the first bullet point
-    if '•' in processed_macro:
-        processed_macro = '•' + processed_macro.split('•', 1)[1]
+
+    # Strip intro text (everything before first ### or numbered section)
+    lines = processed_macro.split('\n')
+    # Find first line that starts with ### or a number
+    start_idx = 0
+    for i, line in enumerate(lines):
+        if line.strip().startswith('###') or (len(line) > 0 and line[0].isdigit()):
+            start_idx = i
+            break
+    processed_macro = '\n'.join(lines[start_idx:])
+
+    # Remove horizontal rules (---)
+    processed_macro = re.sub(r'-{3,}', '', processed_macro)
+
+    # Convert ### headers to <strong>
+    processed_macro = re.sub(r'###\s*(.+)', r'<strong>\1</strong>', processed_macro)
+
     # Convert **text** to <strong>text</strong>
     processed_macro = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', processed_macro)
+
     # Convert newlines to <br>
     processed_macro = processed_macro.replace(chr(10), '<br>')
 
