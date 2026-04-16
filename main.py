@@ -110,59 +110,20 @@ def read_holdings() -> List[str]:
         return []
 
 
-def analyze_news_sentiment(ticker: str, headlines: List[str]) -> str:
-    """Use Claude AI to analyze news sentiment from headlines"""
-    if not headlines or not ANTHROPIC_API_KEY:
-        return "N/A"
-
-    try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-        headlines_text = "\n".join([f"- {h}" for h in headlines if h])
-        if not headlines_text:
-            return "N/A"
-
-        prompt = f"""Analyze the sentiment of these recent news headlines for {ticker}:
-
-{headlines_text}
-
-Respond with ONLY ONE of these exact formats:
-- "📈 Positive" (if clearly bullish/good news)
-- "📉 Negative" (if clearly bearish/bad news)
-- "Neutral" (if mixed or neutral)
-
-Keep it brief - just the sentiment label."""
-
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=50,
-            temperature=0.1,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        response_text = ""
-        for block in message.content:
-            if hasattr(block, 'text'):
-                response_text += block.text.strip()
-
-        if response_text:
-            logger.info(f"News sentiment for {ticker}: {response_text}")
-            return response_text
-        else:
-            return "N/A"
-
-    except Exception as e:
-        logger.warning(f"Error analyzing news sentiment for {ticker}: {e}")
-        return "N/A"
-
-
 def get_macro_context(date_str: str) -> str:
     """Module 1: Get macro/geopolitical context from Claude"""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-        prompt = f"""Today is {date_str}. Search for today's most important market news and macro developments. In 3 bullet points, give the most important macro and geopolitical factors a Canadian retail investor should know TODAY that could affect North American and global markets. Be specific — mention actual events, not generic risks."""
+        prompt = f"""Today is {date_str}. Search for today's most important market news and macro developments.
 
+Output ONLY 3 bullet points (using emoji bullets like 🛢️, 🏛️, 📉) covering the most important macro and geopolitical factors a Canadian retail investor should know TODAY.
+
+Do NOT include any introductory text, preamble, or sentences before the bullet points.
+Do NOT write "Here are..." or "Today..." or any other introduction.
+Start IMMEDIATELY with the first bullet point.
+
+Be specific — mention actual events, not generic risks."""
         message = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1500,
@@ -249,11 +210,8 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             to=end_date.strftime('%Y-%m-%d')
         )
 
-        # Get top 3 headlines and calculate sentiment
+        # Get top 3 headlines
         headlines = [article.get('headline', '') for article in news[:3]]
-
-        # News sentiment disabled - was causing too many API errors
-        news_sentiment = "N/A"
 
         time.sleep(0.1)  # Rate limiting
 
@@ -264,7 +222,6 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                 'price': current_price,
                 'change_percent': change_percent,
                 'headlines': headlines,
-                'news_sentiment': news_sentiment,
                 'source': 'Finnhub'
             }
         else:
@@ -272,9 +229,8 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             logger.warning(f"No price data from Finnhub for {ticker}, trying Alpha Vantage...")
             av_data = fetch_alpha_vantage_data(ticker)
             if av_data:
-                # Keep Finnhub news and sentiment if available
+                # Keep Finnhub news if available
                 av_data['headlines'] = headlines
-                av_data['news_sentiment'] = news_sentiment
                 return av_data
             else:
                 # Both APIs failed, return ticker with N/A data
@@ -284,7 +240,6 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                     'price': None,
                     'change_percent': None,
                     'headlines': headlines,
-                    'news_sentiment': news_sentiment,
                     'source': 'N/A'
                 }
 
@@ -302,7 +257,6 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                         'price': quote.get('c', 0),
                         'change_percent': quote.get('dp', 0),
                         'headlines': [],
-                        'news_sentiment': 'N/A',
                         'source': 'Finnhub'
                     }
             except:
@@ -320,7 +274,6 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             'price': None,
             'change_percent': None,
             'headlines': [],
-            'news_sentiment': 'N/A',
             'source': 'N/A'
         }
 
@@ -351,7 +304,6 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
                 holdings_text += f"  Day Change: N/A\n"
 
             holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
-            holdings_text += f"  News Sentiment: {data.get('news_sentiment', 'N/A')}\n"
 
         prompt = f"""You are a decisive portfolio analyst for a Canadian retail investor using a self-directed TFSA. Your job is to SYNTHESIZE all available information and give ONE clear recommendation per stock.
 
@@ -362,7 +314,7 @@ HOLDINGS DATA:
 {holdings_text}
 
 INSTRUCTIONS:
-1. Consider ALL factors: price action, news sentiment, macro context
+1. Consider ALL factors: price action, news, macro context
 2. Weigh the pros and cons of each position
 3. Give ONE clear decisive recommendation - don't hedge
 4. Your analysis should be consistent unless underlying data changes significantly
@@ -1262,8 +1214,13 @@ def send_email(subject: str, html_content: str, plain_content: str):
 
 def run_portfolio_analysis():
     """Main pipeline - runs the complete analysis"""
+    import socket
+    hostname = socket.gethostname()
+
     logger.info("="*60)
     logger.info("Starting portfolio analysis pipeline")
+    logger.info(f"Instance: {hostname}")
+    logger.info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info("="*60)
 
     # Step 0: Git pull
@@ -1365,8 +1322,25 @@ def run_portfolio_analysis():
 
 
 def schedule_job():
-    """Schedule the job to run weekdays at 11am"""
-    logger.info("Scheduler initialized - Running Mon-Fri at 7:00am")
+    """Schedule the job to run weekdays at 7am LOCAL TIME
+
+    IMPORTANT: If running on Railway/cloud, the schedule runs in UTC timezone!
+    - 07:00 UTC = ~3:00 AM Eastern Time (EDT/EST)
+    - If you're getting duplicate emails (3 AM and 7 AM), you likely have TWO instances:
+      1. Cloud instance (Railway) running in UTC at 07:00 (= 3 AM local)
+      2. Local instance running at 07:00 local time (= 7 AM local)
+
+    To fix: Either stop one instance OR adjust the cloud schedule to run at 11:00 UTC (= 7 AM EDT)
+    """
+    import socket
+    hostname = socket.gethostname()
+
+    logger.info("="*60)
+    logger.info("SCHEDULER STARTING")
+    logger.info(f"Instance identifier: {hostname}")
+    logger.info(f"Scheduled time: Mon-Fri at 07:00 (LOCAL timezone)")
+    logger.info("WARNING: Cloud instances run in UTC - see function docstring for timezone info")
+    logger.info("="*60)
 
     schedule.every().monday.at("07:00").do(run_portfolio_analysis)
     schedule.every().tuesday.at("07:00").do(run_portfolio_analysis)
