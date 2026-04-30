@@ -427,6 +427,7 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
         # Format large numbers
         volume_str = f"${volume_24h / 1_000_000_000:.2f}B" if volume_24h >= 1_000_000_000 else f"${volume_24h / 1_000_000:.1f}M"
         mcap_str = f"${market_cap / 1_000_000_000:.2f}B" if market_cap >= 1_000_000_000 else f"${market_cap / 1_000_000:.1f}M"
+        price_str = f"${price:,.2f}" if price >= 1 else f"${price:.6f}"
 
         html += f"""
             <div class="crypto-card">
@@ -436,7 +437,7 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
                     <span class="coin-ticker">{symbol}</span>
                 </div>
                 <div class="price-row">
-                    <span class="price">${price:,.2f if price >= 1 else f'{price:.6f}'}</span>
+                    <span class="price">{price_str}</span>
                     <span class="change {change_class}">{change_symbol}{change_24h:.2f}% (24h)</span>
                 </div>
                 <div class="metrics">
