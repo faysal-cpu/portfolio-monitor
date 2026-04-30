@@ -495,11 +495,13 @@ Top 10 cryptocurrencies ranked by trading potential (volatility + volume)
 
         volume_str = f"${volume_24h / 1_000_000_000:.2f}B" if volume_24h >= 1_000_000_000 else f"${volume_24h / 1_000_000:.1f}M"
         hot_flag = "🔥 " if change_1h and abs(change_1h) > 2 else ""
+        price_plain = f"${price:,.2f}" if price >= 1 else f"${price:.6f}"
+        change_1h_plain = f"{change_1h:+.2f}" if change_1h else "+0.00"
 
         plain += f"""
 #{rank} {hot_flag}{name} ({symbol})
-  Price: ${price:,.2f}
-  1h Momentum: {change_1h:+.2f if change_1h else 0:+.2f}%
+  Price: {price_plain}
+  1h Momentum: {change_1h_plain}%
   24h Change: {change_24h:+.2f}%
   24h Volume: {volume_str}
   Volatility Score: {volatility_score:.2f}
