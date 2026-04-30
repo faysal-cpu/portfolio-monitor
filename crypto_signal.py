@@ -158,11 +158,38 @@ def calculate_volatility_score(coin: Dict) -> float:
 
 
 def rank_cryptos(coins: List[Dict]) -> List[Dict]:
-    """Rank cryptos by combined volatility + volume score, return top 10"""
+    """Rank cryptos by combined volatility + volume score, return top 10
+
+    Filters applied BEFORE scoring:
+    1. Exclude stablecoins (no volatility by design)
+    2. Minimum $1M 24h volume (liquidity requirement for trading)
+    """
     try:
-        # Calculate scores and filter out zeros
+        # Stablecoin exclusion list (uppercase)
+        STABLECOINS = {'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDD', 'GUSD', 'USDP'}
+
+        # Minimum volume threshold
+        MIN_VOLUME_USD = 1_000_000  # $1M minimum
+
+        # Filter and score
         scored_coins = []
+        excluded_count = {'stablecoin': 0, 'low_volume': 0}
+
         for coin in coins:
+            symbol = coin.get('symbol', '').upper()
+            volume_24h = coin.get('total_volume', 0)
+
+            # Filter 1: Exclude stablecoins
+            if symbol in STABLECOINS:
+                excluded_count['stablecoin'] += 1
+                continue
+
+            # Filter 2: Minimum volume check
+            if volume_24h < MIN_VOLUME_USD:
+                excluded_count['low_volume'] += 1
+                continue
+
+            # Calculate score for qualifying coins
             score = calculate_volatility_score(coin)
             if score > 0:
                 coin['volatility_score'] = score
@@ -171,6 +198,7 @@ def rank_cryptos(coins: List[Dict]) -> List[Dict]:
         # Sort by score descending
         ranked = sorted(scored_coins, key=lambda x: x['volatility_score'], reverse=True)
 
+        logger.info(f"Filtered out: {excluded_count['stablecoin']} stablecoins, {excluded_count['low_volume']} low-volume coins")
         logger.info(f"Ranked {len(ranked)} coins by volatility score")
         return ranked[:10]  # Top 10
 
