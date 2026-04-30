@@ -237,7 +237,7 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }}
         .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1e3a8a;
             color: #ffffff !important;
             padding: 40px 30px;
             text-align: center;
@@ -249,7 +249,6 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
             letter-spacing: -0.5px;
             line-height: 1.3;
             color: #ffffff !important;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }}
         .section {{
             padding: 32px 24px;
@@ -277,12 +276,11 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
         /* Crypto Cards */
         .crypto-card {{
             background: #ffffff;
-            border: 1px solid #e2e8f0;
+            border: 2px solid #cbd5e0;
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 16px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
         }}
         .crypto-card:hover {{
             box-shadow: 0 8px 24px rgba(0,0,0,0.12);
@@ -297,12 +295,12 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
             gap: 8px;
         }}
         .rank {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1e3a8a;
             color: white;
             font-weight: 800;
             font-size: 14px;
             padding: 6px 12px;
-            border-radius: 20px;
+            border-radius: 6px;
             min-width: 32px;
             text-align: center;
         }}
@@ -419,8 +417,8 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>🚀 Crypto Volatility Watchlist — {date_str}</h1>
+        <div class="header" style="background: #1e3a8a; color: #ffffff; padding: 40px 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #ffffff;">🚀 Crypto Volatility Watchlist — {date_str}</h1>
         </div>
 
         <div class="section">
@@ -459,9 +457,9 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
         change_1h_color = '#10b981' if change_1h and change_1h >= 0 else '#ef4444'
 
         html += f"""
-            <div class="crypto-card" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+            <div class="crypto-card" style="background: #ffffff; border: 2px solid #cbd5e0; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
                 <div class="crypto-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-                    <span class="rank" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 800; font-size: 14px; padding: 6px 12px; border-radius: 20px;">#{rank}</span>
+                    <span class="rank" style="background: #1e3a8a; color: white; font-weight: 800; font-size: 14px; padding: 6px 12px; border-radius: 6px;">#{rank}</span>
                     <span class="coin-name" style="font-size: 18px; font-weight: 700; color: #1a202c; flex: 1; margin-left: 12px;">{hot_indicator}{name}</span>
                     <span class="coin-ticker" style="font-size: 14px; font-weight: 600; color: #718096; text-transform: uppercase;">{symbol}</span>
                 </div>
