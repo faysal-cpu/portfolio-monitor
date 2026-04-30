@@ -168,6 +168,9 @@ def rank_cryptos(coins: List[Dict]) -> List[Dict]:
         # Stablecoin exclusion list (uppercase)
         STABLECOINS = {'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDD', 'GUSD', 'USDP'}
 
+        # Stablecoin name patterns (case-insensitive)
+        STABLE_PATTERNS = ['stable', 'usd', 'usdc', 'usdt']
+
         # Minimum volume threshold
         MIN_VOLUME_USD = 1_000_000  # $1M minimum
 
@@ -177,11 +180,18 @@ def rank_cryptos(coins: List[Dict]) -> List[Dict]:
 
         for coin in coins:
             symbol = coin.get('symbol', '').upper()
+            name = coin.get('name', '').lower()
             volume_24h = coin.get('total_volume', 0)
 
-            # Filter 1: Exclude stablecoins
+            # Filter 1: Exclude stablecoins (by ticker)
             if symbol in STABLECOINS:
                 excluded_count['stablecoin'] += 1
+                continue
+
+            # Filter 1b: Exclude stablecoins (by name pattern)
+            if any(pattern in name for pattern in STABLE_PATTERNS):
+                excluded_count['stablecoin'] += 1
+                logger.info(f"Excluded {symbol} ({name}) - stablecoin name pattern match")
                 continue
 
             # Filter 2: Minimum volume check
