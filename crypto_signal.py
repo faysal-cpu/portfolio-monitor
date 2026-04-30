@@ -575,7 +575,7 @@ def send_email(subject: str, html_content: str, plain_content: str):
 
         # Create the email message using SendGrid SDK
         message = Mail(
-            from_email=Email(EMAIL_FROM),
+            from_email=Email(email=EMAIL_FROM, name="Daily Crypto Monitor"),
             to_emails=to_emails_list,
             subject=subject,
             plain_text_content=Content("text/plain", plain_content),

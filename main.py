@@ -1157,7 +1157,7 @@ def send_email(subject: str, html_content: str, plain_content: str):
 
         # Create the email message using SendGrid SDK
         message = Mail(
-            from_email=Email(EMAIL_FROM),
+            from_email=Email(email=EMAIL_FROM, name="Daily Portfolio Monitor"),
             to_emails=To(EMAIL_TO),
             subject=subject,
             plain_text_content=Content("text/plain", plain_content),
