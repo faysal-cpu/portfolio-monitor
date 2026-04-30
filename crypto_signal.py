@@ -428,6 +428,8 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
         volume_str = f"${volume_24h / 1_000_000_000:.2f}B" if volume_24h >= 1_000_000_000 else f"${volume_24h / 1_000_000:.1f}M"
         mcap_str = f"${market_cap / 1_000_000_000:.2f}B" if market_cap >= 1_000_000_000 else f"${market_cap / 1_000_000:.1f}M"
         price_str = f"${price:,.2f}" if price >= 1 else f"${price:.6f}"
+        change_1h_str = f"{change_1h:.2f}" if change_1h else "0.00"
+        change_1h_color = '#10b981' if change_1h and change_1h >= 0 else '#ef4444'
 
         html += f"""
             <div class="crypto-card">
@@ -443,7 +445,7 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
                 <div class="metrics">
                     <div class="metric">
                         <div class="metric-label">1h Momentum</div>
-                        <div class="metric-value" style="color: {'#10b981' if change_1h and change_1h >= 0 else '#ef4444'};">{change_1h_symbol}{change_1h:.2f if change_1h else 0:.2f}%</div>
+                        <div class="metric-value" style="color: {change_1h_color};">{change_1h_symbol}{change_1h_str}%</div>
                     </div>
                     <div class="metric">
                         <div class="metric-label">24h Volume</div>
