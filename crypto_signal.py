@@ -397,11 +397,11 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
 
         <div class="section">
             <div class="intro">
-                <strong>Top 10 cryptocurrencies ranked by near-term trading potential</strong> based on 24-hour volatility and volume.
+                <strong style="color: #1a202c;">Top 10 cryptocurrencies ranked by trading potential</strong> — based on 24h volatility + volume.
                 <br><br>
-                🔥 = Hot momentum (>2% move in last hour) | Volatility scores combine price range (60%) + volume (40%).
-                <br><br>
-                This is a pre-trading watchlist, not investment advice.
+                <strong style="color: #d97706;">🔥 Hot Now:</strong> <span style="color: #2d3748;">Price moved >2% in the last hour (building momentum)</span>
+                <br>
+                <strong style="color: #667eea;">Volatility Score:</strong> <span style="color: #2d3748;">Higher = more price movement + liquidity (scale: 0-20+)</span>
             </div>
 """
 
@@ -416,11 +416,10 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
         market_cap = coin.get('market_cap', 0)
         volatility_score = coin.get('volatility_score', 0)
 
-        change_class = 'positive' if change_24h >= 0 else 'negative'
         change_symbol = '+' if change_24h >= 0 else ''
+        change_24h_color = '#10b981' if change_24h >= 0 else '#ef4444'
 
         # 1-hour momentum indicator
-        change_1h_class = 'positive' if change_1h and change_1h >= 0 else 'negative'
         change_1h_symbol = '+' if change_1h and change_1h >= 0 else ''
         hot_indicator = '🔥 ' if change_1h and abs(change_1h) > 2 else ''  # Flag if 1h change > 2%
 
@@ -432,32 +431,32 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
         change_1h_color = '#10b981' if change_1h and change_1h >= 0 else '#ef4444'
 
         html += f"""
-            <div class="crypto-card">
-                <div class="crypto-header">
-                    <span class="rank">#{rank}</span>
-                    <span class="coin-name">{hot_indicator}{name}</span>
-                    <span class="coin-ticker">{symbol}</span>
+            <div class="crypto-card" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+                <div class="crypto-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                    <span class="rank" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 800; font-size: 14px; padding: 6px 12px; border-radius: 20px;">#{rank}</span>
+                    <span class="coin-name" style="font-size: 18px; font-weight: 700; color: #1a202c; flex: 1; margin-left: 12px;">{hot_indicator}{name}</span>
+                    <span class="coin-ticker" style="font-size: 14px; font-weight: 600; color: #718096; text-transform: uppercase;">{symbol}</span>
                 </div>
-                <div class="price-row">
-                    <span class="price">{price_str}</span>
-                    <span class="change {change_class}">{change_symbol}{change_24h:.2f}% (24h)</span>
+                <div class="price-row" style="display: flex; justify-content: space-between; align-items: center; margin: 12px 0; padding: 12px; background: #f7fafc; border-radius: 8px;">
+                    <span class="price" style="font-size: 20px; font-weight: 700; color: #2d3748;">{price_str}</span>
+                    <span class="change" style="font-size: 17px; font-weight: 700; color: {change_24h_color};">{change_symbol}{change_24h:.2f}% (24h)</span>
                 </div>
-                <div class="metrics">
-                    <div class="metric">
-                        <div class="metric-label">1h Momentum</div>
-                        <div class="metric-value" style="color: {change_1h_color};">{change_1h_symbol}{change_1h_str}%</div>
+                <div class="metrics" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
+                    <div class="metric" style="padding: 10px; background: #f7fafc; border-radius: 8px;">
+                        <div class="metric-label" style="font-size: 12px; color: #718096; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">1h Momentum</div>
+                        <div class="metric-value" style="font-size: 15px; font-weight: 700; color: {change_1h_color};">{change_1h_symbol}{change_1h_str}%</div>
                     </div>
-                    <div class="metric">
-                        <div class="metric-label">24h Volume</div>
-                        <div class="metric-value">{volume_str}</div>
+                    <div class="metric" style="padding: 10px; background: #f7fafc; border-radius: 8px;">
+                        <div class="metric-label" style="font-size: 12px; color: #718096; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">24h Volume</div>
+                        <div class="metric-value" style="font-size: 15px; font-weight: 700; color: #2d3748;">{volume_str}</div>
                     </div>
-                    <div class="metric">
-                        <div class="metric-label">Market Cap</div>
-                        <div class="metric-value">{mcap_str}</div>
+                    <div class="metric" style="padding: 10px; background: #f7fafc; border-radius: 8px;">
+                        <div class="metric-label" style="font-size: 12px; color: #718096; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Market Cap</div>
+                        <div class="metric-value" style="font-size: 15px; font-weight: 700; color: #2d3748;">{mcap_str}</div>
                     </div>
-                    <div class="metric">
-                        <div class="metric-label">Volatility Score</div>
-                        <div class="metric-value" style="color: #d97706; font-weight: 800;">{volatility_score:.2f}</div>
+                    <div class="metric" style="padding: 10px; background: #f7fafc; border-radius: 8px;">
+                        <div class="metric-label" style="font-size: 12px; color: #718096; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Volatility Score</div>
+                        <div class="metric-value" style="font-size: 15px; font-weight: 700; color: #d97706;">{volatility_score:.2f}</div>
                     </div>
                 </div>
             </div>
@@ -468,10 +467,9 @@ def create_crypto_email(top_coins: List[Dict], date_str: str) -> Tuple[str, str]
         </div>
 
         <div class="footer">
-            <p><strong>For Dylan & Faysal</strong></p>
-            <p>Data from CoinGecko. 1h momentum shows recent price action. Scores combine 24h volatility (60%) + volume (40%).</p>
-            <p class="timestamp">Generated: {timestamp}</p>
-            <p><strong>Not financial advice. DYOR.</strong></p>
+            <p><strong>Daily crypto watchlist for Dylan & Faysal</strong></p>
+            <p>Data source: CoinGecko free API • Generated: {timestamp}</p>
+            <p style="margin-top: 8px; font-size: 12px; color: #a0aec0;">Not financial advice. Always DYOR.</p>
         </div>
     </div>
 </body>
