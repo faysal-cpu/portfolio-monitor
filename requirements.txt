@@ -1,6 +1,6 @@
 anthropic>=0.40.0
 finnhub-python>=2.4.0
-sendgrid>=6.11.0
+sib-api-v3-sdk>=7.6.0
 python-dotenv>=1.0.0
 schedule>=1.2.0
 requests>=2.31.0

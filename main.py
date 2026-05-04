@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import anthropic
 import finnhub
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, Email, To, Content
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 from dotenv import load_dotenv
 import schedule
 import requests
@@ -54,7 +54,7 @@ else:
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
+BREVO_API_KEY = os.getenv('BREVO_API_KEY')
 EMAIL_TO = os.getenv('EMAIL_TO')
 EMAIL_FROM = os.getenv('EMAIL_FROM')
 
@@ -63,16 +63,16 @@ logger.info("Loaded credentials:")
 logger.info(f"  FINNHUB_API_KEY: {FINNHUB_API_KEY[:20] + '...' if FINNHUB_API_KEY else '✗ MISSING'}")
 logger.info(f"  ALPHA_VANTAGE_API_KEY: {ALPHA_VANTAGE_API_KEY[:15] + '...' if ALPHA_VANTAGE_API_KEY else '✗ MISSING'}")
 logger.info(f"  ANTHROPIC_API_KEY: {ANTHROPIC_API_KEY[:20] + '...' if ANTHROPIC_API_KEY else '✗ MISSING'}")
-logger.info(f"  SENDGRID_API_KEY: {SENDGRID_API_KEY[:20] + '...' if SENDGRID_API_KEY else '✗ MISSING'}")
+logger.info(f"  BREVO_API_KEY: {BREVO_API_KEY[:20] + '...' if BREVO_API_KEY else '✗ MISSING'}")
 logger.info(f"  EMAIL_FROM: {EMAIL_FROM}")
 logger.info(f"  EMAIL_TO: {EMAIL_TO}")
 logger.info("="*60)
 
 # Validate critical credentials
-if not EMAIL_FROM or not EMAIL_TO or not SENDGRID_API_KEY:
+if not EMAIL_FROM or not EMAIL_TO or not BREVO_API_KEY:
     logger.error("CRITICAL: Missing required email credentials!")
     logger.error("Please ensure you have set these environment variables:")
-    logger.error("  SENDGRID_API_KEY=SG.your_sendgrid_api_key")
+    logger.error("  BREVO_API_KEY=xkeysib-your_brevo_api_key")
     logger.error("  EMAIL_FROM=your_sender@example.com")
     logger.error("  EMAIL_TO=your_recipient@example.com")
     logger.error("On Railway: Set these in the Variables tab")
@@ -1132,7 +1132,7 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 
 
 def send_email(subject: str, html_content: str, plain_content: str):
-    """Send email via SendGrid Python library"""
+    """Send email via Brevo (Sendinblue) API"""
 
     # ALWAYS save email locally first
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1147,64 +1147,71 @@ def send_email(subject: str, html_content: str, plain_content: str):
     try:
         # Log email details
         logger.info("="*60)
-        logger.info("EMAIL SEND ATTEMPT (SendGrid Python SDK)")
+        logger.info("EMAIL SEND ATTEMPT (Brevo API)")
         logger.info("="*60)
         logger.info(f"From: {EMAIL_FROM}")
         logger.info(f"To: {EMAIL_TO}")
         logger.info(f"Subject: {subject}")
-        logger.info(f"SendGrid API Key: {SENDGRID_API_KEY[:20]}... (length: {len(SENDGRID_API_KEY)})")
-        logger.info(f"API Key valid format: {'✓ Yes' if SENDGRID_API_KEY.startswith('SG.') else '✗ No - should start with SG.'}")
+        logger.info(f"Brevo API Key: {BREVO_API_KEY[:20]}... (length: {len(BREVO_API_KEY)})")
+        logger.info(f"API Key valid format: {'✓ Yes' if BREVO_API_KEY.startswith('xkeysib-') else '✗ No - should start with xkeysib-'}")
 
-        # Create the email message using SendGrid SDK
-        message = Mail(
-            from_email=Email(email=EMAIL_FROM, name="Daily Portfolio Monitor"),
-            to_emails=To(EMAIL_TO),
+        # Configure Brevo API
+        configuration = sib_api_v3_sdk.Configuration()
+        configuration.api_key['api-key'] = BREVO_API_KEY
+
+        # Create API instance
+        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+
+        # Create email message
+        sender = {"name": "Daily Portfolio Monitor", "email": EMAIL_FROM}
+        to = [{"email": EMAIL_TO}]
+
+        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+            to=to,
+            sender=sender,
             subject=subject,
-            plain_text_content=Content("text/plain", plain_content),
-            html_content=Content("text/html", html_content)
+            html_content=html_content,
+            text_content=plain_content
         )
 
-        # Initialize SendGrid client and send
-        logger.info("Initializing SendGrid client...")
-        sg = SendGridAPIClient(api_key=SENDGRID_API_KEY)
+        logger.info("Initializing Brevo client...")
+        logger.info("Sending email via Brevo...")
 
-        logger.info("Sending email via SendGrid...")
-        response = sg.send(message)
+        # Send the email
+        api_response = api_instance.send_transac_email(send_smtp_email)
 
-        logger.info(f"✓ Response Status: {response.status_code}")
-        logger.info(f"  Response Headers: {dict(response.headers)}")
-        logger.info(f"  Response Body: {response.body if hasattr(response, 'body') else '(none)'}")
+        logger.info(f"✓ SUCCESS: Email sent via Brevo!")
+        logger.info(f"  → Message ID: {api_response.message_id}")
+        logger.info(f"  → Email saved locally: {filename}")
+        logger.info("="*60)
+        return True
 
-        if response.status_code in [200, 202]:
-            logger.info("✓ SUCCESS: Email sent to SendGrid!")
-            logger.info("  → Check SendGrid Activity Feed: https://app.sendgrid.com/email_activity")
-            logger.info(f"  → Email saved locally: {filename}")
-            logger.info("="*60)
-            return True
-        else:
-            logger.error(f"✗ Unexpected status code: {response.status_code}")
-            logger.info("="*60)
-            return False
-
-    except Exception as e:
+    except ApiException as e:
         logger.error("="*60)
-        logger.error("✗ SENDGRID ERROR")
+        logger.error("✗ BREVO API ERROR")
         logger.error("="*60)
-        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error type: ApiException")
         logger.error(f"Error message: {str(e)}")
-
-        # Try to extract more details from SendGrid errors
-        if hasattr(e, 'body'):
-            logger.error(f"Error body: {e.body}")
-        if hasattr(e, 'status_code'):
-            logger.error(f"Status code: {e.status_code}")
-        if hasattr(e, 'headers'):
-            logger.error(f"Headers: {e.headers}")
-
+        logger.error(f"Status code: {e.status}")
+        logger.error(f"Reason: {e.reason}")
         logger.error(f"Email saved locally: {filename}")
         logger.error("="*60)
 
-        # Import traceback for full error details
+        import traceback
+        logger.error("Full traceback:")
+        logger.error(traceback.format_exc())
+
+        return False
+
+    except Exception as e:
+        logger.error("="*60)
+        logger.error("✗ BREVO ERROR")
+        logger.error("="*60)
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Email saved locally: {filename}")
+        logger.error("="*60)
+
         import traceback
         logger.error("Full traceback:")
         logger.error(traceback.format_exc())
