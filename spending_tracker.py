@@ -23,8 +23,8 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import anthropic
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, Email, To, Content
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 import schedule
 
 
@@ -63,7 +63,7 @@ logger.info(f".env file loaded: {env_loaded}")
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
 GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE')
-SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
+BREVO_API_KEY = os.getenv('BREVO_API_KEY')
 EMAIL_FROM = os.getenv('EMAIL_FROM')
 EMAIL_TO = os.getenv('EMAIL_TO')
 
@@ -72,20 +72,20 @@ logger.info("Loaded credentials:")
 logger.info(f"  ANTHROPIC_API_KEY: {ANTHROPIC_API_KEY[:20] + '...' if ANTHROPIC_API_KEY else '✗ MISSING'}")
 logger.info(f"  GOOGLE_DRIVE_FOLDER_ID: {GOOGLE_DRIVE_FOLDER_ID[:20] + '...' if GOOGLE_DRIVE_FOLDER_ID else '✗ MISSING'}")
 logger.info(f"  GOOGLE_SERVICE_ACCOUNT_FILE: {GOOGLE_SERVICE_ACCOUNT_FILE if GOOGLE_SERVICE_ACCOUNT_FILE else '✗ MISSING'}")
-logger.info(f"  SENDGRID_API_KEY: {SENDGRID_API_KEY[:20] + '...' if SENDGRID_API_KEY else '✗ MISSING'}")
+logger.info(f"  BREVO_API_KEY: {BREVO_API_KEY[:20] + '...' if BREVO_API_KEY else '✗ MISSING'}")
 logger.info(f"  EMAIL_FROM: {EMAIL_FROM}")
 logger.info(f"  EMAIL_TO: {EMAIL_TO}")
 logger.info("="*60)
 
 # Validate critical credentials
 if not all([ANTHROPIC_API_KEY, GOOGLE_DRIVE_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_FILE,
-            SENDGRID_API_KEY, EMAIL_FROM, EMAIL_TO]):
+            BREVO_API_KEY, EMAIL_FROM, EMAIL_TO]):
     logger.error("CRITICAL: Missing required credentials!")
     logger.error("Please ensure your .env file has:")
     logger.error("  ANTHROPIC_API_KEY=sk-ant-...")
     logger.error("  GOOGLE_DRIVE_FOLDER_ID=...")
     logger.error("  GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json")
-    logger.error("  SENDGRID_API_KEY=SG...")
+    logger.error("  BREVO_API_KEY=xkeysib-...")
     logger.error("  EMAIL_FROM=your@email.com")
     logger.error("  EMAIL_TO=recipient@email.com")
     sys.exit(1)
@@ -2115,7 +2115,7 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
 
 
 def send_email(subject: str, html_content: str):
-    """Send email via SendGrid"""
+    """Send email via Brevo (Sendinblue) API"""
 
     # ALWAYS save email locally first
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -2129,43 +2129,64 @@ def send_email(subject: str, html_content: str):
 
     try:
         logger.info("="*60)
-        logger.info("EMAIL SEND ATTEMPT (SendGrid)")
+        logger.info("EMAIL SEND ATTEMPT (Brevo API)")
         logger.info("="*60)
         logger.info(f"From: {EMAIL_FROM}")
         logger.info(f"To: {EMAIL_TO}")
         logger.info(f"Subject: {subject}")
-        logger.info(f"SendGrid API Key: {SENDGRID_API_KEY[:20]}...")
-        logger.info(f"API Key valid format: {'✓ Yes' if SENDGRID_API_KEY.startswith('SG.') else '✗ No - should start with SG.'}")
+        logger.info(f"Brevo API Key: {BREVO_API_KEY[:20]}...")
+        logger.info(f"API Key valid format: {'✓ Yes' if BREVO_API_KEY.startswith('xkeysib-') else '✗ No - should start with xkeysib-'}")
 
-        message = Mail(
-            from_email=Email(EMAIL_FROM),
-            to_emails=To(EMAIL_TO),
+        # Configure Brevo API
+        configuration = sib_api_v3_sdk.Configuration()
+        configuration.api_key['api-key'] = BREVO_API_KEY
+
+        # Create API instance
+        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+
+        # Create email message
+        sender = {"name": "Spending Tracker", "email": EMAIL_FROM}
+        to = [{"email": EMAIL_TO}]
+
+        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+            to=to,
+            sender=sender,
             subject=subject,
-            html_content=Content("text/html", html_content)
+            html_content=html_content
         )
 
-        logger.info("Initializing SendGrid client...")
-        sg = SendGridAPIClient(api_key=SENDGRID_API_KEY)
+        logger.info("Initializing Brevo client...")
+        logger.info("Sending email via Brevo...")
 
-        logger.info("Sending email via SendGrid...")
-        response = sg.send(message)
+        # Send the email
+        api_response = api_instance.send_transac_email(send_smtp_email)
 
-        logger.info(f"✓ Response Status: {response.status_code}")
+        logger.info(f"✓ SUCCESS: Email sent via Brevo!")
+        logger.info(f"  → Message ID: {api_response.message_id}")
+        logger.info(f"  → Email saved locally: {filename}")
+        logger.info("="*60)
+        return True
 
-        if response.status_code in [200, 202]:
-            logger.info("✓ SUCCESS: Email sent to SendGrid!")
-            logger.info("  → Check SendGrid Activity Feed: https://app.sendgrid.com/email_activity")
-            logger.info(f"  → Email saved locally: {filename}")
-            logger.info("="*60)
-            return True
-        else:
-            logger.error(f"✗ Unexpected status code: {response.status_code}")
-            logger.info("="*60)
-            return False
+    except ApiException as e:
+        logger.error("="*60)
+        logger.error("✗ BREVO API ERROR")
+        logger.error("="*60)
+        logger.error(f"Error type: ApiException")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Status code: {e.status}")
+        logger.error(f"Reason: {e.reason}")
+        logger.error(f"Email saved locally: {filename}")
+        logger.error("="*60)
+
+        import traceback
+        logger.error("Full traceback:")
+        logger.error(traceback.format_exc())
+
+        return False
 
     except Exception as e:
         logger.error("="*60)
-        logger.error("✗ SENDGRID ERROR")
+        logger.error("✗ BREVO ERROR")
         logger.error("="*60)
         logger.error(f"Error type: {type(e).__name__}")
         logger.error(f"Error message: {str(e)}")
