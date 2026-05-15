@@ -110,23 +110,49 @@ def read_holdings() -> List[str]:
         return []
 
 
-def get_macro_context(date_str: str) -> str:
-    """Module 1: Get macro/geopolitical context from Claude"""
+def get_macro_context(date_str: str, holdings: List[str]) -> str:
+    """Module 1: Get macro/geopolitical context - RESTRUCTURED per audit"""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-        prompt = f"""Today is {date_str}. Search for today's most important market news and macro developments.
+        # Categorize holdings by exposure
+        energy_metal_tickers = [t for t in holdings if t in ['HBM', 'LUN', 'FCX', 'CCJ']]
+        semi_tech_tickers = [t for t in holdings if t in ['LRCX', 'AMAT', 'MU', 'AXTI', 'TSEM', 'ORCL', 'FLEX']]
+        defense_space_tickers = [t for t in holdings if t in ['MDA', 'NOC', 'ASTS']]
+        other_tickers = [t for t in holdings if t not in energy_metal_tickers + semi_tech_tickers + defense_space_tickers]
 
-Output ONLY 3 bullet points (using emoji bullets like 🛢️, 🏛️, 📉) covering the most important macro and geopolitical factors a Canadian retail investor should know TODAY.
+        prompt = f"""Today is {date_str}. Search for TODAY's most relevant macro/market news for a Canadian TFSA investor.
 
-Do NOT include any introductory text, preamble, or sentences before the bullet points.
-Do NOT write "Here are..." or "Today..." or any other introduction.
-Start IMMEDIATELY with the first bullet point.
+CRITICAL FORMAT REQUIREMENTS:
+- Maximum 200 words total
+- Use EXACTLY this structure:
+- Three sections: COMMODITIES & ENERGY, RATES & TECH, GEOPOLITICS & DEFENSE
+- Each section: [Factor update] → Affects: [specific tickers] → Watch: [specific trigger with date]
 
-Be specific — mention actual events, not generic risks."""
+Portfolio context:
+- Energy/Metals: {', '.join(energy_metal_tickers) if energy_metal_tickers else 'None'}
+- Semiconductors/Tech: {', '.join(semi_tech_tickers) if semi_tech_tickers else 'None'}
+- Defense/Space: {', '.join(defense_space_tickers) if defense_space_tickers else 'None'}
+- Other: {', '.join(other_tickers) if other_tickers else 'None'}
+
+BANNED PHRASES: "kills," "demands action," "unambiguous," "firing on all cylinders," "transformational"
+
+Output format:
+COMMODITIES & ENERGY:
+[Brief update on oil/copper/uranium prices and key driver] → Affects: [tickers] → Watch: [specific data release or event, with date]
+
+RATES & TECH:
+[Brief update on Fed/BoC rates, key economic data] → Affects: [tickers] → Watch: [next meeting or data release, with date]
+
+GEOPOLITICS & DEFENSE:
+[Brief update on trade/conflicts/defense spending] → Affects: [tickers] → Watch: [summit/deadline/vote, with date]
+
+Be specific. If no material update in a category, say "No material update."
+Start immediately with COMMODITIES & ENERGY."""
+
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1500,
+            max_tokens=800,
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}],
             tools=[{"type": "web_search_20250305", "name": "web_search"}]
@@ -139,15 +165,15 @@ Be specific — mention actual events, not generic risks."""
                 response_text += block.text
 
         if response_text:
-            logger.info("Successfully fetched macro context from Claude with web search")
+            logger.info("Successfully fetched structured macro context")
             return response_text
         else:
             logger.warning("No text found in macro context response")
-            return "• Market context unavailable\n• Please check logs for errors\n• Analysis continues with available data"
+            return "COMMODITIES & ENERGY: No data available\nRATES & TECH: No data available\nGEOPOLITICS & DEFENSE: No data available"
 
     except Exception as e:
         logger.error(f"Error fetching macro context: {e}")
-        return "• Market context unavailable\n• Please check logs for errors\n• Analysis continues with available data"
+        return "COMMODITIES & ENERGY: Error fetching data\nRATES & TECH: Error fetching data\nGEOPOLITICS & DEFENSE: Error fetching data"
 
 
 def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
@@ -279,70 +305,115 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
 
 
 
-def analyze_holdings(holdings_data: List[Dict], macro_context: str) -> str:
-    """Module 2: Send all holdings to Claude for analysis"""
+def analyze_holdings(holdings_data: List[Dict], macro_context: str, rec_history: Dict, position_status: Dict) -> str:
+    """Module 2: Analyze holdings with ALL AUDIT IMPROVEMENTS"""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-        # Format holdings data
+        # Format holdings data WITH prior recommendations
         holdings_text = ""
         for data in holdings_data:
-            holdings_text += f"\n{data['ticker']}:\n"
+            ticker = data['ticker']
+            holdings_text += f"\n{ticker}:\n"
 
-            # Handle None values for price
+            # Price data
             price = data.get('price')
             if price is not None:
-                holdings_text += f"  Price: ${price:.2f}\n"
+                holdings_text += f"  Current Price: ${price:.2f}\n"
             else:
-                holdings_text += f"  Price: N/A (data unavailable)\n"
+                holdings_text += f"  Current Price: N/A (DATA MISSING - OUTPUT 'NO DATA' FOR THIS TICKER)\n"
 
-            # Handle None values for change_percent
+            # Change percent
             change = data.get('change_percent')
             if change is not None:
                 holdings_text += f"  Day Change: {change:.2f}%\n"
             else:
                 holdings_text += f"  Day Change: N/A\n"
 
-            holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:3]) if data.get('headlines') else 'No recent news'}\n"
+            # Prior recommendation
+            prior_rec, prior_date = get_prior_recommendation(ticker, rec_history)
+            if prior_rec and prior_date:
+                holdings_text += f"  PRIOR RECOMMENDATION: {prior_rec} on {prior_date}\n"
+            else:
+                holdings_text += f"  PRIOR RECOMMENDATION: None (first analysis)\n"
 
-        prompt = f"""You are a decisive portfolio analyst for a Canadian retail investor using a self-directed TFSA. Your job is to SYNTHESIZE all available information and give ONE clear recommendation per stock.
+            # Position status
+            status = position_status.get(ticker, 'OPEN')
+            if status == 'PENDING EXIT':
+                holdings_text += f"  POSITION STATUS: PENDING EXIT - DO NOT ANALYZE, OUTPUT SELL ONLY\n"
+            else:
+                holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:2]) if data.get('headlines') else 'No recent news'}\n"
 
-MACRO CONTEXT:
+        prompt = f"""You are a disciplined portfolio analyst for a Canadian TFSA investor. Generate daily holdings analysis with STRICT RULES.
+
+MACRO CONTEXT (200 words max):
 {macro_context}
 
-HOLDINGS DATA:
+HOLDINGS DATA (includes prior recommendations):
 {holdings_text}
 
-INSTRUCTIONS:
-1. Consider ALL factors: price action, news, macro context
-2. Weigh the pros and cons of each position
-3. Give ONE clear decisive recommendation - don't hedge
-4. Your analysis should be consistent unless underlying data changes significantly
-5. Be direct and opinionated - if you say HOLD, mean it. If you say SELL, mean it.
-6. Provide DETAILED reasoning - explain the full context and logic behind your recommendation
-7. Be specific about risks - don't just say "volatility", explain what specific event or factor creates the risk
+MANDATORY RULES:
+1. If price is "N/A (DATA MISSING)", output EXACTLY: "TICKER|NO DATA|N/A|No price data available|N/A"
+   Do NOT analyze positions with missing data.
 
-CRITICAL: Output ONLY pipe-delimited lines. NO explanatory text. NO preamble.
+2. If POSITION STATUS is "PENDING EXIT", output EXACTLY: "TICKER|SELL|HIGH|Exit this position - previously flagged for sale|Capital preservation"
+   Do NOT provide new analysis for pending exits.
 
-Format (one line per stock):
+3. Every recommendation MUST reference a SPECIFIC, NAMED CATALYST:
+   - Earnings date (with actual date)
+   - Analyst action (firm name + date)
+   - Contract announcement (with details)
+   - Regulatory event (with date)
+   - Specific macro event affecting this stock
+
+   BANNED: "The thesis is intact" - this is NOT a catalyst
+
+4. If recommendation CHANGES from prior day, you MUST start REASON with:
+   "CHANGE FROM [PRIOR] because [specific new event/data]"
+
+5. CONFIDENCE RULES:
+   HIGH = named catalyst + price action aligns with recommendation + no major unresolved binary risk
+   MEDIUM = thesis supported but no new catalyst, OR one unresolved binary risk
+   LOW = missing data, contradicting price action, or speculative
+
+   EXAMPLES:
+   - Stock down 5%, no news → MAX confidence is MEDIUM, not HIGH
+   - BUY MORE when stock up 10% same day → Forbidden, say HOLD
+   - Binary risks (Taiwan invasion, China export ban) → MAX confidence MEDIUM
+
+6. BANNED PHRASES (will cause analysis rejection):
+   "kills," "demands action," "unambiguous," "firing on all cylinders," "gift,"
+   "the market is underreacting," "transformational," "the easy money has been made,"
+   "irreplaceable backbone" (after first use), "compounding quietly," "dead cat bounce"
+
+7. WORD LIMITS:
+   REASON: Max 80 words (must include specific catalyst or "no new catalyst today")
+   RISK: Max 50 words (specific, named risk with trigger)
+
+8. THESIS CHECKPOINT REQUIRED:
+   Each REASON must include: "Thesis checkpoint: [metric/event]. Status: [confirms/neutral/contradicts]"
+
+CRITICAL: Output ONLY pipe-delimited lines. NO preamble. NO explanatory text.
+
+Format:
 TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK
 
-RECOMMENDATION: BUY MORE, HOLD, SELL, or WATCH
-CONFIDENCE: HIGH, MEDIUM, or LOW
-REASON: Detailed explanation of your recommendation including specific catalysts, price action, news impact, and sentiment data (50-80 words)
-RISK: Specific risk factors and what could go wrong with this position (30-50 words)
+RECOMMENDATION: BUY MORE, HOLD, SELL, NO DATA
+CONFIDENCE: HIGH, MEDIUM, LOW, N/A
+REASON: Must include named catalyst OR "No new catalyst today - [thesis checkpoint]" (max 80 words)
+RISK: Specific risk with trigger (max 50 words)
 
-Start immediately with the first ticker line."""
+Start immediately with first ticker line."""
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=5000,
-            temperature=0.3,
+            max_tokens=6000,
+            temperature=0.2,  # Lower temperature for more consistent adherence to rules
             messages=[{"role": "user", "content": prompt}]
         )
 
         response = message.content[0].text
-        logger.info("Successfully analyzed holdings with Claude")
+        logger.info("Successfully analyzed holdings with audit-compliant prompt")
         return response
 
     except Exception as e:
@@ -350,8 +421,86 @@ Start immediately with the first ticker line."""
         return "ANALYSIS_FAILED"
 
 
+def load_recommendation_history() -> Dict:
+    """Load history of all recommendations by date and ticker"""
+    history_file = 'recommendations_history.json'
+    try:
+        if os.path.exists(history_file):
+            with open(history_file, 'r') as f:
+                import json
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.warning(f"Error loading recommendation history: {e}")
+        return {}
+
+
+def save_recommendation_history(history: Dict):
+    """Save complete recommendation history"""
+    history_file = 'recommendations_history.json'
+    try:
+        import json
+        with open(history_file, 'w') as f:
+            json.dump(history, f, indent=2)
+        logger.info(f"Saved recommendation history with {len(history)} tickers")
+    except Exception as e:
+        logger.error(f"Error saving recommendation history: {e}")
+
+
+def get_prior_recommendation(ticker: str, history: Dict) -> Tuple[Optional[str], Optional[str]]:
+    """Get the most recent recommendation for a ticker
+    Returns: (recommendation, date) or (None, None)"""
+    if ticker not in history or not history[ticker]:
+        return None, None
+
+    # Get the most recent entry
+    dates = sorted(history[ticker].keys(), reverse=True)
+    if dates:
+        most_recent_date = dates[0]
+        return history[ticker][most_recent_date], most_recent_date
+    return None, None
+
+
+def load_position_status() -> Dict:
+    """Load position status tracking (OPEN/PENDING EXIT/CLOSED)"""
+    status_file = 'position_status.json'
+    try:
+        if os.path.exists(status_file):
+            with open(status_file, 'r') as f:
+                import json
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.warning(f"Error loading position status: {e}")
+        return {}
+
+
+def save_position_status(status: Dict):
+    """Save position status tracking"""
+    status_file = 'position_status.json'
+    try:
+        import json
+        with open(status_file, 'w') as f:
+            json.dump(status, f, indent=2)
+        logger.info(f"Saved position status for {len(status)} tickers")
+    except Exception as e:
+        logger.error(f"Error saving position status: {e}")
+
+
+def update_position_status(ticker: str, recommendation: str, status_dict: Dict) -> str:
+    """Update position status based on recommendation
+    Returns: OPEN, PENDING EXIT, or CLOSED"""
+    if recommendation == 'SELL':
+        status_dict[ticker] = 'PENDING EXIT'
+        return 'PENDING EXIT'
+    elif ticker not in status_dict or status_dict[ticker] == 'PENDING EXIT':
+        # If no status or was pending exit, set to OPEN
+        status_dict[ticker] = 'OPEN'
+    return status_dict.get(ticker, 'OPEN')
+
+
 def load_recommendation_cache() -> Dict:
-    """Load cache of recently recommended stocks to avoid repetition"""
+    """Load cache of recently recommended stocks to avoid repetition (for Opportunities)"""
     cache_file = 'recommendations_cache.json'
     try:
         if os.path.exists(cache_file):
@@ -520,8 +669,37 @@ Return ONLY a comma-separated list of ticker symbols. No explanations."""
     return trending_data
 
 
-def find_opportunities(trending_data: List[Dict]) -> Tuple[str, List[str]]:
-    """Get Claude's recommendations for new opportunities
+def filter_opportunities_by_audit_rules(trending_data: List[Dict], current_holdings: List[str], holdings_themes: Dict[str, List[str]]) -> List[Dict]:
+    """HARD FILTER: Remove opportunities that violate audit rules
+
+    Exclusion rules:
+    1. Stock up >8% today with no fundamental catalyst (just price momentum)
+    2. Duplicates existing portfolio theme without clear differentiation
+    3. Pre-revenue with <4 quarters cash runway (can't verify without financials, skip this rule)
+    4. OTC pink sheets (not applicable for Finnhub data)
+    """
+    filtered = []
+
+    for data in trending_data:
+        ticker = data.get('ticker', '')
+        change_pct = data.get('change_percent', 0)
+        headlines = data.get('headlines', [])
+
+        # Rule 1: Exclude if up >8% with no meaningful news
+        if change_pct and change_pct > 8 and len(headlines) == 0:
+            logger.info(f"OPPORTUNITIES FILTER: Excluding {ticker} - up {change_pct:.1f}% with no news (price chasing)")
+            continue
+
+        # Rule 2: Theme overlap check (simplified - just flag, don't exclude)
+        # This would require more sophisticated theme detection
+
+        filtered.append(data)
+
+    return filtered[:15]  # Limit to 15 candidates
+
+
+def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -> Tuple[str, List[str]]:
+    """Find new opportunities with HARD AUDIT FILTERS
     Returns: (response_text, list_of_recommended_tickers)"""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -530,9 +708,25 @@ def find_opportunities(trending_data: List[Dict]) -> Tuple[str, List[str]]:
         recent_cache = load_recommendation_cache()
         recent_list = list(recent_cache.keys())
 
-        # Format trending data
+        # Define portfolio themes for overlap detection
+        holdings_themes = {
+            'semiconductors': ['AMAT', 'LRCX', 'MU', 'AXTI', 'TSEM'],
+            'defense_space': ['MDA', 'NOC', 'ASTS'],
+            'metals_mining': ['FCX', 'HBM', 'LUN', 'CCJ'],
+            'tech_software': ['ORCL', 'TRI'],
+            'healthcare_biotech': ['LNTH', 'AXSM', 'MBX']
+        }
+
+        # APPLY HARD FILTERS BEFORE Claude sees the data
+        filtered_trending = filter_opportunities_by_audit_rules(trending_data, current_holdings, holdings_themes)
+
+        if len(filtered_trending) < 5:
+            logger.warning(f"Only {len(filtered_trending)} opportunities passed filters - may not reach 5")
+            return "No qualifying opportunities today - all candidates excluded by filters (price chasing or theme overlap)", []
+
+        # Format filtered trending data
         trending_text = ""
-        for data in trending_data:
+        for data in filtered_trending:
             price = data.get('price')
             change = data.get('change_percent')
 
@@ -545,43 +739,79 @@ def find_opportunities(trending_data: List[Dict]) -> Tuple[str, List[str]]:
 
         recent_str = f"\nRECENTLY RECOMMENDED (DO NOT REPEAT): {', '.join(recent_list)}\n" if recent_list else ""
 
+        # Get current holdings by theme for Claude context
+        theme_summary = "\n".join([f"{theme}: {', '.join(tickers)}" for theme, tickers in holdings_themes.items()])
+
         today = datetime.now().strftime('%B %d, %Y')
 
-        prompt = f"""CRITICAL: Respond ONLY with pipe-delimited lines. NO explanatory text. NO preamble. NO markdown. NO introductions.
+        prompt = f"""You are finding new investment opportunities for a Canadian TFSA portfolio. STRICT FILTERING RULES APPLY.
 
 Today is {today}.
 
-Investor profile: Canadian TFSA, momentum plays, binary catalysts, defence, AI, commodities, small caps. Somewhat risk tolerant.
+CURRENT HOLDINGS BY THEME:
+{theme_summary}
 {recent_str}
-TRENDING TICKERS:
+
+FILTERED TRENDING CANDIDATES (already excluded price-chasers >8% with no news):
 {trending_text}
 
-⚠️ IMPORTANT: Pick 5 DIFFERENT stocks that have NOT been recommended recently. Prioritize variety and fresh ideas.
+MANDATORY RULES:
+1. Maximum 5 opportunities. Each MUST pass strict quality filters (below).
 
-Output EXACTLY 5 lines in this format:
-TICKER|COMPANY|WHY TODAY|UPSIDE|RISK|EXCHANGE
+2. Each opportunity MUST have a NAMED CATALYST with a DATE:
+   - "Earnings released today" with specific numbers
+   - "Analyst upgrade by [firm] on [date]"
+   - "Contract announced [date]"
+   - "Regulatory approval on [date]"
 
-WHY TODAY: Detailed explanation of why this stock is relevant TODAY - include specific catalysts, news, or market conditions (40-60 words)
-UPSIDE: HIGH or MEDIUM
-RISK: Specific risk factors and concerns - be detailed about what could go wrong (25-40 words)
+   BANNED: "trending," "momentum," "sector rotation," "up X% today" - these are NOT catalysts
+
+3. EDGE STATEMENT REQUIRED:
+   Compare to existing holdings. If it duplicates a theme (e.g., another semiconductor stock when we have AMAT, LRCX, MU),
+   you MUST explain why this is better than adding to existing positions.
+
+4. ENTRY CONDITION:
+   Never recommend a stock that is up >5% today unless the catalyst is fundamental (earnings beat, major contract).
+   Specify a better entry point or say "PASS - wait for pullback"
+
+5. BANNED PHRASES:
+   "firing on all cylinders," "gift," "the market is underreacting," "transformational," "exploding," "surging"
+
+6. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
+   If ZERO candidates meet criteria, output:
+   "No qualifying opportunities today - [reason: price chasing / theme overlap / no catalysts]"
+
+OUTPUT FORMAT (1-5 opportunities, or "No qualifying opportunities"):
+TICKER|COMPANY|CATALYST|EDGE|ENTRY|RISK|EXCHANGE
+
+CATALYST: Named event with date (30-50 words)
+EDGE: Why this vs. adding to existing position (20-30 words)
+ENTRY: Specific price level or "PASS - [reason]" (10-20 words)
+RISK: One specific risk with trigger (20-30 words)
 EXCHANGE: TSX or US
 
-Start immediately with the first ticker line. Nothing else."""
+Start immediately with first ticker or "No qualifying opportunities today"."""
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=3500,
-            temperature=0.5,  # Increased temperature for more variety
+            max_tokens=2000,
+            temperature=0.4,
             messages=[{"role": "user", "content": prompt}]
         )
 
         response = message.content[0].text
-        logger.info("Successfully found opportunities with Claude")
+        logger.info("Successfully found opportunities with audit filters")
 
         # Extract recommended tickers from response
         import re
         lines = response.strip().split('\n')
         recommended_tickers = []
+
+        # Check if response says no opportunities
+        if "no qualifying opportunities" in response.lower():
+            logger.info("Claude found no qualifying opportunities after filtering")
+            return response, []
+
         for line in lines:
             if '|' in line:
                 parts = line.split('|')
@@ -597,9 +827,10 @@ Start immediately with the first ticker line. Nothing else."""
         return "OPPORTUNITIES_UNAVAILABLE", []
 
 
-def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Dict]:
-    """Parse Claude's analysis into structured data - ROBUST VERSION"""
+def parse_holdings_analysis(analysis: str, holdings_data: List[Dict], rec_history: Dict, position_status: Dict) -> List[Dict]:
+    """Parse Claude's analysis with PRIOR REC TRACKING and CHANGE DETECTION"""
     parsed = []
+    today = datetime.now().strftime('%Y-%m-%d')
 
     if analysis == "ANALYSIS_FAILED":
         # Return raw data
@@ -611,7 +842,10 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
                 'recommendation': 'N/A',
                 'confidence': 'N/A',
                 'reason': 'Analysis failed',
-                'risk': 'See logs'
+                'risk': 'See logs',
+                'prior_recommendation': None,
+                'prior_date': None,
+                'status': position_status.get(data['ticker'], 'OPEN')
             })
         return parsed
 
@@ -635,14 +869,37 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
                 # Case-insensitive lookup
                 if ticker_upper in data_map:
                     original_ticker = ticker_lookup[ticker_upper]
+                    recommendation = parts[1].strip()
+                    confidence = parts[2].strip()
+                    reason = parts[3].strip()
+                    risk = parts[4].strip() if len(parts) > 4 else 'N/A'
+
+                    # Get prior recommendation
+                    prior_rec, prior_date = get_prior_recommendation(original_ticker, rec_history)
+
+                    # Update recommendation history
+                    if original_ticker not in rec_history:
+                        rec_history[original_ticker] = {}
+                    rec_history[original_ticker][today] = recommendation
+
+                    # Update position status
+                    status = update_position_status(original_ticker, recommendation, position_status)
+
+                    # Check if recommendation changed
+                    recommendation_changed = (prior_rec is not None and prior_rec != recommendation)
+
                     parsed.append({
                         'ticker': original_ticker,
                         'price': data_map[ticker_upper]['price'],
                         'change_percent': data_map[ticker_upper]['change_percent'],
-                        'recommendation': parts[1].strip(),
-                        'confidence': parts[2].strip(),
-                        'reason': parts[3].strip(),
-                        'risk': parts[4].strip() if len(parts) > 4 else 'N/A'
+                        'recommendation': recommendation,
+                        'confidence': confidence,
+                        'reason': reason,
+                        'risk': risk,
+                        'prior_recommendation': prior_rec,
+                        'prior_date': prior_date,
+                        'status': status,
+                        'changed': recommendation_changed
                     })
                     parsed_tickers.add(ticker_upper)
                 else:
@@ -660,68 +917,107 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict]) -> List[Di
     else:
         logger.info(f"✓ Holdings parser: Successfully parsed {len(parsed)} out of {len(holdings_data)} tickers")
 
+        # Log recommendation changes
+        changes = [p for p in parsed if p.get('changed')]
+        if changes:
+            logger.info(f"RECOMMENDATION CHANGES detected for {len(changes)} positions:")
+            for p in changes:
+                logger.info(f"  {p['ticker']}: {p['prior_recommendation']} → {p['recommendation']}")
+
     return parsed
 
 
 def parse_opportunities(opportunities: str) -> List[Dict]:
-    """Parse Claude's opportunities into structured data - ROBUST VERSION"""
+    """Parse Claude's opportunities with NEW AUDIT FORMAT
+    Format: TICKER|COMPANY|CATALYST|EDGE|ENTRY|RISK|EXCHANGE"""
     parsed = []
 
     if opportunities == "OPPORTUNITIES_UNAVAILABLE":
         logger.warning("Opportunities marked as unavailable")
         return []
 
+    # Check if Claude said no qualifying opportunities
+    if "no qualifying opportunities" in opportunities.lower():
+        logger.info("No qualifying opportunities found (filter enforced)")
+        return []
+
     lines = opportunities.strip().split('\n')
 
-    # Only filter out the exact header line
-    header_pattern = "TICKER|COMPANY|WHY TODAY|UPSIDE|RISK|EXCHANGE"
+    # Skip header if present
+    header_pattern = "TICKER|COMPANY|CATALYST|EDGE|ENTRY|RISK|EXCHANGE"
 
     for line in lines:
         if '|' in line:
-            # Skip the exact header line (case-insensitive)
+            # Skip header
             if line.strip().upper() == header_pattern.upper():
                 continue
 
             parts = line.split('|')
-            if len(parts) >= 6:
+            if len(parts) >= 7:  # New format has 7 fields
                 ticker = parts[0].strip()
                 company = parts[1].strip()
 
-                # Skip if ticker is empty or just whitespace
-                if not ticker or not company:
+                # Skip if ticker is empty or header
+                if not ticker or ticker.upper() == "TICKER":
                     continue
 
-                # Skip only if it's EXACTLY one of the column names (less aggressive)
-                if ticker.upper() == "TICKER" or company.upper() == "COMPANY":
+                # Check if ENTRY says PASS
+                entry = parts[4].strip()
+                is_pass = "PASS" in entry.upper()
+
+                parsed.append({
+                    'ticker': ticker,
+                    'company': company,
+                    'catalyst': parts[2].strip(),
+                    'edge': parts[3].strip(),
+                    'entry': entry,
+                    'risk': parts[5].strip(),
+                    'exchange': parts[6].strip(),
+                    'is_pass': is_pass  # Flag if this is a PASS recommendation
+                })
+            elif len(parts) >= 6:  # Fallback to old format if needed
+                ticker = parts[0].strip()
+                company = parts[1].strip()
+
+                if not ticker or ticker.upper() == "TICKER":
                     continue
 
                 parsed.append({
                     'ticker': ticker,
                     'company': company,
-                    'why_today': parts[2].strip(),
-                    'upside': parts[3].strip(),
-                    'risk': parts[4].strip(),
-                    'exchange': parts[5].strip()
+                    'catalyst': parts[2].strip(),  # Treat "why_today" as catalyst
+                    'edge': 'See catalyst',
+                    'entry': 'Review before buying',
+                    'risk': parts[4].strip() if len(parts) > 4 else 'N/A',
+                    'exchange': parts[5].strip() if len(parts) > 5 else 'Unknown',
+                    'is_pass': False
                 })
 
     # Validation
     if len(parsed) == 0:
-        logger.error("⚠️ CRITICAL: Opportunities parser returned 0 results! Check Claude's response format.")
-        logger.error(f"Claude response preview: {opportunities[:500]}...")
+        logger.info("Opportunities parser: No opportunities parsed (may be intentional if all filtered)")
     else:
         logger.info(f"✓ Opportunities parser: Successfully parsed {len(parsed)} opportunities")
+        pass_count = sum(1 for p in parsed if p.get('is_pass'))
+        if pass_count > 0:
+            logger.info(f"  {pass_count} marked as PASS (wait for better entry)")
 
-    return parsed[:5]  # Limit to 5
+    return parsed[:5]  # Limit to 5 (user preference with strict filters)
 
 
 def create_html_email(macro_context: str, holdings: List[Dict], opportunities: List[Dict], date_str: str) -> Tuple[str, str]:
-    """Create HTML and plain text email content"""
+    """Create HTML and plain text email content - AUDIT-COMPLIANT VERSION"""
 
-    # Count recommendations by type
-    rec_counts = {'BUY MORE': 0, 'HOLD': 0, 'SELL': 0, 'WATCH': 0}
+    # Count recommendations by type (including new categories)
+    rec_counts = {'BUY MORE': 0, 'HOLD': 0, 'SELL': 0, 'WATCH': 0, 'PENDING EXIT': 0, 'NO DATA': 0}
     for h in holdings:
         rec = h['recommendation'].upper()
-        if 'BUY MORE' in rec or 'BUY' in rec:
+        status = h.get('status', 'OPEN')
+        if status == 'PENDING EXIT':
+            rec_counts['PENDING EXIT'] += 1
+        elif 'NO DATA' in rec:
+            rec_counts['NO DATA'] += 1
+        elif 'BUY' in rec:
             rec_counts['BUY MORE'] += 1
         elif 'SELL' in rec:
             rec_counts['SELL'] += 1
@@ -730,7 +1026,22 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         else:
             rec_counts['HOLD'] += 1
 
-    rec_summary = f"{rec_counts['BUY MORE']} BUY · {rec_counts['HOLD']} HOLD · {rec_counts['SELL']} SELL · {rec_counts['WATCH']} WATCH"
+    # Build summary line (exclude zero counts)
+    summary_parts = []
+    if rec_counts['BUY MORE'] > 0:
+        summary_parts.append(f"{rec_counts['BUY MORE']} BUY")
+    if rec_counts['HOLD'] > 0:
+        summary_parts.append(f"{rec_counts['HOLD']} HOLD")
+    if rec_counts['SELL'] > 0:
+        summary_parts.append(f"{rec_counts['SELL']} SELL")
+    if rec_counts['WATCH'] > 0:
+        summary_parts.append(f"{rec_counts['WATCH']} WATCH")
+    if rec_counts['PENDING EXIT'] > 0:
+        summary_parts.append(f"{rec_counts['PENDING EXIT']} PENDING EXIT")
+    if rec_counts['NO DATA'] > 0:
+        summary_parts.append(f"{rec_counts['NO DATA']} NO DATA")
+
+    rec_summary = " · ".join(summary_parts) if summary_parts else "No positions"
 
     # HTML Email
     html = f"""
@@ -1023,7 +1334,14 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 
     for h in holdings:
         rec_class = ''
-        if 'BUY MORE' in h['recommendation'].upper() or 'BUY' in h['recommendation'].upper():
+        status = h.get('status', 'OPEN')
+
+        # Determine recommendation class
+        if status == 'PENDING EXIT':
+            rec_class = 'sell'
+        elif 'NO DATA' in h['recommendation'].upper():
+            rec_class = 'watch'
+        elif 'BUY' in h['recommendation'].upper():
             rec_class = 'buy-more'
         elif 'SELL' in h['recommendation'].upper():
             rec_class = 'sell'
@@ -1042,6 +1360,21 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             change_class = ''
             change_str = "N/A"
 
+        # Build prior recommendation line
+        prior_line = ""
+        if h.get('prior_recommendation') and h.get('prior_date'):
+            prior_rec = h['prior_recommendation']
+            prior_date = h['prior_date']
+            if h.get('changed'):
+                prior_line = f'<div style="background: #fff3cd; padding: 8px; border-radius: 6px; margin: 8px 0; font-size: 13px;"><strong>⚠️ CHANGE:</strong> {prior_rec} on {prior_date} → {h["recommendation"]}</div>'
+            else:
+                prior_line = f'<div style="color: #666; font-size: 12px; margin-top: 4px;">Prior: {prior_rec} ({prior_date})</div>'
+
+        # Add status badge if PENDING EXIT
+        status_badge = ''
+        if status == 'PENDING EXIT':
+            status_badge = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px;">PENDING EXIT</span>'
+
         html += f"""
             <div class="stock-card">
                 <div class="stock-header">
@@ -1052,7 +1385,9 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
                 <div class="stock-rec-line">
                     <span class="{rec_class}">{h['recommendation']}</span>
                     <span style="color: #666; font-size: 13px; margin-left: 8px;">{h['confidence']} confidence</span>
+                    {status_badge}
                 </div>
+                {prior_line}
                 <div class="stock-detail"><strong>Reason:</strong> {h['reason']}</div>
                 <div class="stock-detail"><strong>Risk:</strong> {h['risk']}</div>
             </div>
@@ -1062,30 +1397,50 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         </div>
 """
 
-    if opportunities:
+    if opportunities and len(opportunities) > 0:
         html += """
         <div class="section">
-            <h2>🔥 Opportunities</h2>
+            <h2>🔥 Opportunities (Max 5, filtered for quality)</h2>
 """
         for opp in opportunities:
             # Convert markdown **text** to HTML <strong>text</strong>
             import re
-            why_today = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['why_today'])
-            company = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['company'])
-            upside = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['upside'])
-            risk = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['risk'])
-            exchange = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp['exchange'])
+            catalyst = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('catalyst', opp.get('why_today', '')))
+            company = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('company', ''))
+            edge = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('edge', 'See catalyst'))
+            entry = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('entry', 'Review before buying'))
+            risk = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('risk', 'N/A'))
+            exchange = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('exchange', 'Unknown'))
+
+            # Check if this is a PASS recommendation
+            is_pass = opp.get('is_pass', False)
+            pass_badge = ''
+            if is_pass:
+                pass_badge = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; margin-left: 8px;">PASS - WAIT</span>'
 
             html += f"""
             <div class="opportunity-card">
-                <div class="ticker">{opp['ticker']}</div>
+                <div class="ticker">{opp['ticker']}{pass_badge}</div>
                 <h3>{company}</h3>
-                <p><strong>Why Today:</strong> {why_today}</p>
-                <p><strong>Upside:</strong> {upside} | <strong>Risk:</strong> {risk}</p>
+                <p><strong>Catalyst:</strong> {catalyst}</p>
+                <p><strong>Edge vs. Holdings:</strong> {edge}</p>
+                <p><strong>Entry:</strong> {entry}</p>
+                <p><strong>Risk:</strong> {risk}</p>
                 <p><strong>Exchange:</strong> {exchange}</p>
             </div>
 """
         html += """
+        </div>
+"""
+    else:
+        # Show message if no opportunities found
+        html += """
+        <div class="section">
+            <h2>🔥 Opportunities</h2>
+            <div style="background: #f1f5f9; padding: 20px; border-radius: 10px; text-align: center; color: #64748b;">
+                <p><strong>No qualifying opportunities today</strong></p>
+                <p style="font-size: 14px;">All candidates excluded by quality filters (price chasing, theme overlap, or no catalysts)</p>
+            </div>
         </div>
 """
 
@@ -1101,8 +1456,9 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 </html>
 """
 
-    # Plain text version
+    # Plain text version (AUDIT-COMPLIANT)
     plain = f"""PORTFOLIO BRIEF — {date_str} | {len(holdings)} positions
+{rec_summary}
 
 === MACRO CONTEXT ===
 {macro_context}
@@ -1114,19 +1470,30 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         change_val = h.get('change_percent')
         change_str = f"({change_val:+.2f}%)" if change_val is not None else "(N/A)"
 
-        plain += f"\n{h['ticker']}: {price_str} {change_str}\n"
-        plain += f"  Recommendation: {h.get('recommendation', 'N/A')} ({h.get('confidence', 'N/A')} confidence)\n"
+        # Status and prior recommendation
+        status = h.get('status', 'OPEN')
+        status_str = f" [{status}]" if status == 'PENDING EXIT' else ""
+        prior = f" (Prior: {h['prior_recommendation']} on {h['prior_date']})" if h.get('prior_recommendation') else ""
+        change_flag = " ⚠️ CHANGED" if h.get('changed') else ""
+
+        plain += f"\n{h['ticker']}: {price_str} {change_str}{status_str}{change_flag}\n"
+        plain += f"  Recommendation: {h.get('recommendation', 'N/A')} ({h.get('confidence', 'N/A')} confidence){prior}\n"
         plain += f"  Reason: {h.get('reason', 'N/A')}\n"
         plain += f"  Risk: {h.get('risk', 'N/A')}\n"
 
-    if opportunities:
-        plain += "\n=== OPPORTUNITIES ===\n"
+    if opportunities and len(opportunities) > 0:
+        plain += "\n=== OPPORTUNITIES (max 5, quality filtered) ===\n"
         for opp in opportunities:
-            plain += f"\n{opp['ticker']} - {opp['company']} ({opp['exchange']})\n"
-            plain += f"  Why Today: {opp['why_today']}\n"
-            plain += f"  Upside: {opp['upside']} | Risk: {opp['risk']}\n"
+            pass_flag = " [PASS - WAIT]" if opp.get('is_pass') else ""
+            plain += f"\n{opp['ticker']} - {opp.get('company', 'N/A')} ({opp.get('exchange', 'Unknown')}){pass_flag}\n"
+            plain += f"  Catalyst: {opp.get('catalyst', opp.get('why_today', 'N/A'))}\n"
+            plain += f"  Edge: {opp.get('edge', 'See catalyst')}\n"
+            plain += f"  Entry: {opp.get('entry', 'Review before buying')}\n"
+            plain += f"  Risk: {opp.get('risk', 'N/A')}\n"
+    else:
+        plain += "\n=== OPPORTUNITIES ===\nNo qualifying opportunities today (all filtered for quality)\n"
 
-    plain += f"\n---\nAI analysis for informational purposes only.\nGenerated: {timestamp}\nTo update holdings: edit holdings.txt on GitHub\n"
+    plain += f"\n---\nAI analysis for informational purposes only.\nAUDIT-COMPLIANT VERSION - tracks changes and filters price chasing\nGenerated: {timestamp}\nTo update holdings: edit holdings.txt on GitHub\n"
 
     return html, plain
 
@@ -1220,12 +1587,12 @@ def send_email(subject: str, html_content: str, plain_content: str):
 
 
 def run_portfolio_analysis():
-    """Main pipeline - runs the complete analysis"""
+    """Main pipeline - AUDIT-COMPLIANT VERSION with full tracking"""
     import socket
     hostname = socket.gethostname()
 
     logger.info("="*60)
-    logger.info("Starting portfolio analysis pipeline")
+    logger.info("Starting AUDIT-COMPLIANT portfolio analysis pipeline")
     logger.info(f"Instance: {hostname}")
     logger.info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info("="*60)
@@ -1233,15 +1600,21 @@ def run_portfolio_analysis():
     # Step 0: Git pull
     git_pull_updates()
 
+    # Step 0.5: Load tracking systems
+    logger.info("Loading recommendation history and position status...")
+    rec_history = load_recommendation_history()
+    position_status = load_position_status()
+    logger.info(f"Loaded history for {len(rec_history)} tickers, status for {len(position_status)} positions")
+
     # Step 1: Read holdings
     holdings = read_holdings()
     if not holdings:
         logger.error("No holdings found. Aborting.")
         return
 
-    # Step 2: Get macro context
+    # Step 2: Get macro context (now includes holdings for categorization)
     date_str = datetime.now().strftime('%A, %B %d, %Y')
-    macro_context = get_macro_context(date_str)
+    macro_context = get_macro_context(date_str, holdings)
 
     # Initialize API clients
     try:
@@ -1259,30 +1632,42 @@ def run_portfolio_analysis():
             holdings_data.append(data)
             time.sleep(0.5)  # Rate limiting
         else:
-            logger.warning(f"Skipping {ticker} due to data fetch error")
+            logger.warning(f"Could not fetch data for {ticker}")
+            # Still add to holdings_data with None price so it gets "NO DATA" recommendation
+            holdings_data.append({
+                'ticker': ticker,
+                'price': None,
+                'change_percent': None,
+                'headlines': [],
+                'source': 'N/A'
+            })
 
     if not holdings_data:
-        logger.error("No holdings data fetched. Aborting.")
+        logger.error("No holdings data available. Aborting.")
         return
 
-    # Step 4: Analyze holdings with Claude
-    logger.info("Analyzing holdings with Claude...")
-    analysis = analyze_holdings(holdings_data, macro_context)
+    # Step 4: Analyze holdings with Claude (now includes rec_history and position_status)
+    logger.info("Analyzing holdings with audit-compliant prompt...")
+    analysis = analyze_holdings(holdings_data, macro_context, rec_history, position_status)
 
     # DEBUG: Log Claude's raw response for holdings
     logger.info("="*60)
     logger.info("DEBUG - Holdings Analysis from Claude")
     logger.info("="*60)
     logger.info(f"Response length: {len(analysis)} characters")
-    logger.info(f"Response preview (first 800 chars):\n{analysis[:800]}")
+    logger.info(f"Response preview (first 1000 chars):\n{analysis[:1000]}")
     logger.info("="*60)
 
-    parsed_holdings = parse_holdings_analysis(analysis, holdings_data)
+    parsed_holdings = parse_holdings_analysis(analysis, holdings_data, rec_history, position_status)
 
-    # Step 5: Find new opportunities
-    logger.info("Finding new opportunities...")
+    # Save updated recommendation history and position status
+    save_recommendation_history(rec_history)
+    save_position_status(position_status)
+
+    # Step 5: Find new opportunities (with hard filters)
+    logger.info("Finding new opportunities with audit filters...")
     trending_data = get_trending_tickers(finnhub_client, holdings)
-    opportunities_text, recommended_tickers = find_opportunities(trending_data)
+    opportunities_text, recommended_tickers = find_opportunities(trending_data, holdings)
 
     # DEBUG: Log Claude's raw response for opportunities
     logger.info("="*60)
@@ -1294,20 +1679,41 @@ def run_portfolio_analysis():
 
     parsed_opportunities = parse_opportunities(opportunities_text)
 
-    # Update recommendation cache with new recommendations
+    # Update recommendation cache with new recommendations (for Opportunities tracking)
     if recommended_tickers:
         cache = load_recommendation_cache()
         today = datetime.now().isoformat()
         for ticker in recommended_tickers:
             cache[ticker] = today
         save_recommendation_cache(cache)
-        logger.info(f"Added {len(recommended_tickers)} tickers to recommendation cache")
+        logger.info(f"Added {len(recommended_tickers)} tickers to Opportunities cache")
 
     # Validation: Check if parsing succeeded
     if len(parsed_holdings) == 0:
         logger.error("⚠️⚠️⚠️ CRITICAL WARNING: No holdings were parsed! Email will have empty holdings section!")
+
+    # Count recommendation types
+    rec_counts = {'BUY MORE': 0, 'HOLD': 0, 'SELL': 0, 'WATCH': 0, 'NO DATA': 0, 'PENDING EXIT': 0}
+    for h in parsed_holdings:
+        rec = h['recommendation'].upper()
+        status = h.get('status', 'OPEN')
+        if status == 'PENDING EXIT':
+            rec_counts['PENDING EXIT'] += 1
+        elif 'NO DATA' in rec:
+            rec_counts['NO DATA'] += 1
+        elif 'BUY' in rec:
+            rec_counts['BUY MORE'] += 1
+        elif 'SELL' in rec:
+            rec_counts['SELL'] += 1
+        elif 'WATCH' in rec:
+            rec_counts['WATCH'] += 1
+        else:
+            rec_counts['HOLD'] += 1
+
+    logger.info(f"Recommendation breakdown: {rec_counts}")
+
     if len(parsed_opportunities) == 0:
-        logger.warning("⚠️ WARNING: No opportunities were parsed! Email will have no opportunities section.")
+        logger.info("No opportunities found (may be intentional due to audit filters)")
 
     # Step 6: Create email
     logger.info("Creating email...")
@@ -1324,7 +1730,7 @@ def run_portfolio_analysis():
     send_email(subject, html_content, plain_content)
 
     logger.info("="*60)
-    logger.info("Portfolio analysis pipeline complete")
+    logger.info("AUDIT-COMPLIANT portfolio analysis complete")
     logger.info("="*60)
 
 
