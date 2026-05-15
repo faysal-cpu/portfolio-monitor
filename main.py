@@ -355,66 +355,28 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str, rec_history:
             else:
                 holdings_text += f"  News: {'; '.join(data.get('headlines', [])[:2]) if data.get('headlines') else 'No recent news'}\n"
 
-        prompt = f"""You are a disciplined portfolio analyst for a Canadian TFSA investor. Generate daily holdings analysis with STRICT RULES.
+        prompt = f"""Canadian TFSA portfolio analyst. Daily holdings analysis.
 
-MACRO CONTEXT (200 words max):
-{macro_context}
+MACRO: {macro_context}
 
-HOLDINGS DATA (includes prior recommendations):
+HOLDINGS:
 {holdings_text}
 
-MANDATORY RULES:
-1. If price is "N/A (DATA MISSING)", output EXACTLY: "TICKER|NO DATA|N/A|No price data available|N/A"
-   Do NOT analyze positions with missing data.
+RULES:
+1. Missing price → "TICKER|NO DATA|N/A|No price data|N/A"
+2. PENDING EXIT status → "TICKER|SELL|HIGH|Exit position|Capital preservation"
+3. Changed recommendation → Start REASON: "CHANGE FROM [prior] because [event]"
+4. Catalyst required: earnings date, analyst action (firm+date), contract, regulatory event, specific macro event
+5. BANNED: "thesis intact", "kills", "demands action", "unambiguous", "firing on all cylinders", "gift", "market is underreacting", "transformational"
+6. Confidence: HIGH = catalyst + aligned price + no binary risk | MEDIUM = no new catalyst OR binary risk | LOW = contradicting data
+7. Max words: REASON 80, RISK 50
 
-2. If POSITION STATUS is "PENDING EXIT", output EXACTLY: "TICKER|SELL|HIGH|Exit this position - previously flagged for sale|Capital preservation"
-   Do NOT provide new analysis for pending exits.
-
-3. Every recommendation MUST reference a SPECIFIC, NAMED CATALYST:
-   - Earnings date (with actual date)
-   - Analyst action (firm name + date)
-   - Contract announcement (with details)
-   - Regulatory event (with date)
-   - Specific macro event affecting this stock
-
-   BANNED: "The thesis is intact" - this is NOT a catalyst
-
-4. If recommendation CHANGES from prior day, you MUST start REASON with:
-   "CHANGE FROM [PRIOR] because [specific new event/data]"
-
-5. CONFIDENCE RULES:
-   HIGH = named catalyst + price action aligns with recommendation + no major unresolved binary risk
-   MEDIUM = thesis supported but no new catalyst, OR one unresolved binary risk
-   LOW = missing data, contradicting price action, or speculative
-
-   EXAMPLES:
-   - Stock down 5%, no news → MAX confidence is MEDIUM, not HIGH
-   - BUY MORE when stock up 10% same day → Forbidden, say HOLD
-   - Binary risks (Taiwan invasion, China export ban) → MAX confidence MEDIUM
-
-6. BANNED PHRASES (will cause analysis rejection):
-   "kills," "demands action," "unambiguous," "firing on all cylinders," "gift,"
-   "the market is underreacting," "transformational," "the easy money has been made,"
-   "irreplaceable backbone" (after first use), "compounding quietly," "dead cat bounce"
-
-7. WORD LIMITS:
-   REASON: Max 80 words (must include specific catalyst or "no new catalyst today")
-   RISK: Max 50 words (specific, named risk with trigger)
-
-8. THESIS CHECKPOINT REQUIRED:
-   Each REASON must include: "Thesis checkpoint: [metric/event]. Status: [confirms/neutral/contradicts]"
-
-CRITICAL: Output ONLY pipe-delimited lines. NO preamble. NO explanatory text.
-
-Format:
+Output ONLY pipe lines:
 TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK
 
-RECOMMENDATION: BUY MORE, HOLD, SELL, NO DATA
-CONFIDENCE: HIGH, MEDIUM, LOW, N/A
-REASON: Must include named catalyst OR "No new catalyst today - [thesis checkpoint]" (max 80 words)
-RISK: Specific risk with trigger (max 50 words)
+BUY MORE, HOLD, SELL, or NO DATA | HIGH, MEDIUM, LOW, or N/A
 
-Start immediately with first ticker line."""
+Start with first ticker:"""
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
