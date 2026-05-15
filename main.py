@@ -643,13 +643,15 @@ Return ONLY a comma-separated list of ticker symbols. No explanations."""
     except Exception as e:
         logger.warning(f"Error getting Claude trending suggestions: {e}")
 
-    # Remove tickers already in holdings or recently recommended
-    trending = trending - set(current_holdings) - recently_recommended_tickers
+    # Remove tickers already in holdings (but KEEP recently recommended - we'll check for major catalysts)
+    trending = trending - set(current_holdings)
+
+    logger.info(f"Trending candidates (may include cached): {len(trending)} tickers")
 
     # If we don't have enough trending tickers, add from fallback list
     if len(trending) < 15:
         logger.warning(f"Only found {len(trending)} trending tickers, adding from fallback list")
-        fallback_available = [t for t in fallback_tickers if t not in current_holdings and t not in recently_recommended_tickers]
+        fallback_available = [t for t in fallback_tickers if t not in current_holdings]
         import random
         random.shuffle(fallback_available)
         trending.update(fallback_available[:20])
@@ -735,20 +737,43 @@ def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -
             logger.warning(f"Only {len(filtered_trending)} opportunities passed filters - may not reach 5")
             return "No qualifying opportunities today - all candidates excluded by filters (price chasing or theme overlap)", []
 
-        # Format filtered trending data
+        # Format filtered trending data WITH major catalyst detection
         trending_text = ""
+        major_catalyst_bypasses = []
+
         for data in filtered_trending:
+            ticker = data.get('ticker', '')
             price = data.get('price')
-            change = data.get('change_percent')
+            change = data.get('change_percent', 0)
+            headlines = data.get('headlines', [])
 
             price_str = f"${price:.2f}" if price is not None else "N/A"
             change_str = f"({change:+.2f}%)" if change is not None else "(N/A)"
 
-            trending_text += f"\n{data['ticker']}: {price_str} {change_str}\n"
-            if data.get('headlines'):
-                trending_text += f"  News: {'; '.join(data['headlines'][:2])}\n"
+            # Check for MAJOR CATALYST BYPASS:
+            # - Previously recommended (in cache) AND
+            # - Big move (>10%) AND
+            # - Has fundamental news
+            is_cached = ticker in recent_list
+            has_major_move = abs(change) > 10 if change else False
+            has_news = len(headlines) > 0
 
-        recent_str = f"\nRECENTLY RECOMMENDED (DO NOT REPEAT): {', '.join(recent_list)}\n" if recent_list else ""
+            if is_cached and has_major_move and has_news:
+                major_catalyst_bypasses.append(ticker)
+                trending_text += f"\n{ticker}: {price_str} {change_str} ⚠️ CACHED BUT MAJOR CATALYST - BYPASS ALLOWED\n"
+            else:
+                trending_text += f"\n{ticker}: {price_str} {change_str}\n"
+
+            if headlines:
+                trending_text += f"  News: {'; '.join(headlines[:2])}\n"
+
+        # Build recent recommendations string with bypass explanation
+        if recent_list:
+            recent_str = f"\nRECENTLY RECOMMENDED (normally excluded, but BYPASS ALLOWED if marked above):\n{', '.join(recent_list)}\n"
+            if major_catalyst_bypasses:
+                recent_str += f"\nMAJOR CATALYST BYPASSES (re-recommend these if catalyst is strong):\n{', '.join(major_catalyst_bypasses)}\n"
+        else:
+            recent_str = ""
 
         # Get current holdings by theme for Claude context
         theme_summary = "\n".join([f"{theme}: {', '.join(tickers)}" for theme, tickers in holdings_themes.items()])
@@ -769,26 +794,33 @@ FILTERED TRENDING CANDIDATES (already excluded price-chasers >8% with no news):
 MANDATORY RULES:
 1. Maximum 5 opportunities. Each MUST pass strict quality filters (below).
 
-2. Each opportunity MUST have a NAMED CATALYST with a DATE:
+2. RECENTLY RECOMMENDED CACHE BYPASS:
+   - Normally, recently recommended tickers are excluded
+   - EXCEPTION: If a cached ticker has "⚠️ CACHED BUT MAJOR CATALYST - BYPASS ALLOWED" marking,
+     you MAY re-recommend it IF there is a NEW, DIFFERENT, MAJOR catalyst (earnings beat, major contract, M&A, regulatory approval)
+   - Do NOT re-recommend for the same catalyst type or minor news updates
+
+3. Each opportunity MUST have a NAMED CATALYST with a DATE:
    - "Earnings released today" with specific numbers
    - "Analyst upgrade by [firm] on [date]"
    - "Contract announced [date]"
    - "Regulatory approval on [date]"
+   - "M&A announcement on [date]"
 
    BANNED: "trending," "momentum," "sector rotation," "up X% today" - these are NOT catalysts
 
-3. EDGE STATEMENT REQUIRED:
+4. EDGE STATEMENT REQUIRED:
    Compare to existing holdings. If it duplicates a theme (e.g., another semiconductor stock when we have AMAT, LRCX, MU),
    you MUST explain why this is better than adding to existing positions.
 
-4. ENTRY CONDITION:
+5. ENTRY CONDITION:
    Never recommend a stock that is up >5% today unless the catalyst is fundamental (earnings beat, major contract).
    Specify a better entry point or say "PASS - wait for pullback"
 
-5. BANNED PHRASES:
+6. BANNED PHRASES:
    "firing on all cylinders," "gift," "the market is underreacting," "transformational," "exploding," "surging"
 
-6. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
+7. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
    If ZERO candidates meet criteria, output:
    "No qualifying opportunities today - [reason: price chasing / theme overlap / no catalysts]"
 
