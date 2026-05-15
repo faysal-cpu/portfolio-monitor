@@ -125,9 +125,10 @@ def get_macro_context(date_str: str, holdings: List[str]) -> str:
 
 CRITICAL FORMAT REQUIREMENTS:
 - Maximum 200 words total
-- Use EXACTLY this structure:
-- Three sections: COMMODITIES & ENERGY, RATES & TECH, GEOPOLITICS & DEFENSE
+- Use EXACTLY this structure with emojis
+- Three sections: 🛢️ COMMODITIES & ENERGY, 💰 RATES & TECH, 🌍 GEOPOLITICS & DEFENSE
 - Each section: [Factor update] → Affects: [specific tickers] → Watch: [specific trigger with date]
+- NO introductory text - start IMMEDIATELY with the first emoji and section header
 
 Portfolio context:
 - Energy/Metals: {', '.join(energy_metal_tickers) if energy_metal_tickers else 'None'}
@@ -136,19 +137,20 @@ Portfolio context:
 - Other: {', '.join(other_tickers) if other_tickers else 'None'}
 
 BANNED PHRASES: "kills," "demands action," "unambiguous," "firing on all cylinders," "transformational"
+BANNED INTROS: "Here is," "Today," "Below," DO NOT write ANY text before the first section
 
-Output format:
-COMMODITIES & ENERGY:
+Output format (START WITH THE EMOJI - no text before it):
+🛢️ COMMODITIES & ENERGY:
 [Brief update on oil/copper/uranium prices and key driver] → Affects: [tickers] → Watch: [specific data release or event, with date]
 
-RATES & TECH:
+💰 RATES & TECH:
 [Brief update on Fed/BoC rates, key economic data] → Affects: [tickers] → Watch: [next meeting or data release, with date]
 
-GEOPOLITICS & DEFENSE:
+🌍 GEOPOLITICS & DEFENSE:
 [Brief update on trade/conflicts/defense spending] → Affects: [tickers] → Watch: [summit/deadline/vote, with date]
 
 Be specific. If no material update in a category, say "No material update."
-Start immediately with COMMODITIES & ENERGY."""
+Your first character output MUST be the 🛢️ emoji. Nothing else before it."""
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
@@ -165,15 +167,24 @@ Start immediately with COMMODITIES & ENERGY."""
                 response_text += block.text
 
         if response_text:
+            # Strip any intro text before the first emoji section header
+            import re
+            # Find the first occurrence of emoji section headers
+            emoji_pattern = r'(🛢️|💰|🌍)\s*(COMMODITIES|RATES|GEOPOLITICS)'
+            match = re.search(emoji_pattern, response_text)
+            if match:
+                # Start from the emoji
+                response_text = response_text[match.start():]
+
             logger.info("Successfully fetched structured macro context")
             return response_text
         else:
             logger.warning("No text found in macro context response")
-            return "COMMODITIES & ENERGY: No data available\nRATES & TECH: No data available\nGEOPOLITICS & DEFENSE: No data available"
+            return "🛢️ COMMODITIES & ENERGY: No data available\n💰 RATES & TECH: No data available\n🌍 GEOPOLITICS & DEFENSE: No data available"
 
     except Exception as e:
         logger.error(f"Error fetching macro context: {e}")
-        return "COMMODITIES & ENERGY: Error fetching data\nRATES & TECH: Error fetching data\nGEOPOLITICS & DEFENSE: Error fetching data"
+        return "🛢️ COMMODITIES & ENERGY: Error fetching data\n💰 RATES & TECH: Error fetching data\n🌍 GEOPOLITICS & DEFENSE: Error fetching data"
 
 
 def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
