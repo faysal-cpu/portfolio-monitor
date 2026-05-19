@@ -121,40 +121,50 @@ def get_macro_context(date_str: str, holdings: List[str]) -> str:
         defense_space_tickers = [t for t in holdings if t in ['MDA', 'NOC', 'ASTS']]
         other_tickers = [t for t in holdings if t not in energy_metal_tickers + semi_tech_tickers + defense_space_tickers]
 
-        prompt = f"""Today is {date_str}. Search for TODAY's most relevant macro/market news for a Canadian TFSA investor.
+        prompt = f"""Today is {date_str}. You are writing the macro context section for a Canadian TFSA investor's daily portfolio brief.
 
-CRITICAL FORMAT REQUIREMENTS:
-- Maximum 200 words total
-- Use EXACTLY this structure with emojis
-- Three sections: 🛢️ COMMODITIES & ENERGY, 💰 RATES & TECH, 🌍 GEOPOLITICS & DEFENSE
-- Each section: [Factor update] → Affects: [specific tickers] → Watch: [specific trigger with date]
-- NO introductory text - start IMMEDIATELY with the first emoji and section header
-
-Portfolio context:
+Portfolio holdings include:
 - Energy/Metals: {', '.join(energy_metal_tickers) if energy_metal_tickers else 'None'}
 - Semiconductors/Tech: {', '.join(semi_tech_tickers) if semi_tech_tickers else 'None'}
 - Defense/Space: {', '.join(defense_space_tickers) if defense_space_tickers else 'None'}
 - Other: {', '.join(other_tickers) if other_tickers else 'None'}
 
-BANNED PHRASES: "kills," "demands action," "unambiguous," "firing on all cylinders," "transformational"
-BANNED INTROS: "Here is," "Today," "Below," DO NOT write ANY text before the first section
+Write 2-3 narrative paragraphs (150-200 words EACH) covering today's most relevant macro developments.
 
-Output format (START WITH THE EMOJI - no text before it):
-🛢️ COMMODITIES & ENERGY:
-[Brief update on oil/copper/uranium prices and key driver] → Affects: [tickers] → Watch: [specific data release or event, with date]
+PARAGRAPH STRUCTURE REQUIREMENTS:
 
-💰 RATES & TECH:
-[Brief update on Fed/BoC rates, key economic data] → Affects: [tickers] → Watch: [next meeting or data release, with date]
+1. START each paragraph with: Emoji + Descriptive Headline with Em Dash
+   ✓ GOOD: "🛢️ Middle East War & Oil Shock: A Double-Edged Sword for Canada — "
+   ✓ GOOD: "🏛️ New Fed Chair Kevin Warsh Takes the Helm — Rate Cuts Off the Table — "
+   ✗ BAD: "🛢️ COMMODITIES & ENERGY:"
+   ✗ BAD: "💰 RATES & TECH:"
 
-🌍 GEOPOLITICS & DEFENSE:
-[Brief update on trade/conflicts/defense spending] → Affects: [tickers] → Watch: [summit/deadline/vote, with date]
+2. Write flowing narrative that integrates:
+   - The macro event and WHY it matters for this portfolio
+   - Affected tickers mentioned naturally: "For HBM and FCX, higher diesel costs squeeze margins..."
+   - Specific forward-looking catalyst with date: "Watch the OPEC+ meeting May 28 for..."
 
-Be specific. If no material update in a category, say "No material update."
-Your first character output MUST be the 🛢️ emoji. Nothing else before it."""
+3. Direct analytical tone, no hype language
+
+BANNED PHRASES: "kills", "demands action", "unambiguous", "firing on all cylinders", "gift", "market is underreacting", "transformational"
+
+PARAGRAPH TOPICS (cover 2-3 as relevant today):
+- Commodities/Energy (oil, copper, uranium): affects {', '.join(energy_metal_tickers) if energy_metal_tickers else 'holdings'}
+- Interest Rates/Fed/BoC: affects tech positions and growth stocks
+- Geopolitics/Defense/Trade: affects defense and international exposure
+
+OUTPUT FORMAT (start immediately, no intro text):
+🛢️ [Descriptive Headline with Em Dash] — [150-200 word narrative paragraph with natural ticker mentions and forward catalyst]
+
+💰 [Descriptive Headline with Em Dash] — [150-200 word narrative paragraph]
+
+(Third paragraph optional if highly relevant)
+
+Your first character must be the emoji. No text before it."""
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=800,
+            max_tokens=1200,  # Increased for narrative format (Email 1 style)
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}],
             tools=[{"type": "web_search_20250305", "name": "web_search"}]
@@ -229,8 +239,20 @@ def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
         return None
 
 
-def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
-    """Fetch price, change, and news for a single ticker"""
+def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict] = None) -> Optional[Dict]:
+    """Fetch price, change, and news for a single ticker
+
+    Also verifies company identity if identity_cache is provided.
+    """
+    # Verify company identity first (if cache provided)
+    identity_verified = False
+    identity_data = {}
+
+    if identity_cache is not None:
+        identity_verified, identity_data = verify_company_identity(ticker, finnhub_client, identity_cache)
+        if not identity_verified:
+            logger.warning(f"IDENTITY NOT VERIFIED: {ticker} - will flag in analysis")
+
     try:
         # Get current price
         quote = finnhub_client.quote(ticker)
@@ -259,7 +281,9 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                 'price': current_price,
                 'change_percent': change_percent,
                 'headlines': headlines,
-                'source': 'Finnhub'
+                'source': 'Finnhub',
+                'identity_verified': identity_verified,
+                'identity_data': identity_data
             }
         else:
             # No price data from Finnhub, try Alpha Vantage
@@ -268,6 +292,8 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             if av_data:
                 # Keep Finnhub news if available
                 av_data['headlines'] = headlines
+                av_data['identity_verified'] = identity_verified
+                av_data['identity_data'] = identity_data
                 return av_data
             else:
                 # Both APIs failed, return ticker with N/A data
@@ -277,7 +303,9 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                     'price': None,
                     'change_percent': None,
                     'headlines': headlines,
-                    'source': 'N/A'
+                    'source': 'N/A',
+                    'identity_verified': identity_verified,
+                    'identity_data': identity_data
                 }
 
     except Exception as e:
@@ -294,7 +322,9 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
                         'price': quote.get('c', 0),
                         'change_percent': quote.get('dp', 0),
                         'headlines': [],
-                        'source': 'Finnhub'
+                        'source': 'Finnhub',
+                        'identity_verified': identity_verified,
+                        'identity_data': identity_data
                     }
             except:
                 pass
@@ -303,6 +333,8 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
         logger.warning(f"Finnhub failed for {ticker}, trying Alpha Vantage...")
         av_data = fetch_alpha_vantage_data(ticker)
         if av_data:
+            av_data['identity_verified'] = identity_verified
+            av_data['identity_data'] = identity_data
             return av_data
 
         # Both failed, return N/A data
@@ -311,7 +343,9 @@ def fetch_ticker_data(ticker: str, finnhub_client) -> Optional[Dict]:
             'price': None,
             'change_percent': None,
             'headlines': [],
-            'source': 'N/A'
+            'source': 'N/A',
+            'identity_verified': identity_verified,
+            'identity_data': identity_data
         }
 
 
@@ -321,11 +355,19 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str, rec_history:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-        # Format holdings data WITH prior recommendations
+        # Format holdings data WITH prior recommendations and identity verification
         holdings_text = ""
         for data in holdings_data:
             ticker = data['ticker']
             holdings_text += f"\n{ticker}:\n"
+
+            # Identity verification
+            if data.get('identity_verified'):
+                identity = data.get('identity_data', {})
+                holdings_text += f"  Company: {identity.get('confirmed_name', 'Unknown')} ({identity.get('exchange', 'Unknown')})\n"
+                holdings_text += f"  Business: {identity.get('business_description', 'N/A')}\n"
+            else:
+                holdings_text += f"  ⚠️ IDENTITY NOT VERIFIED - OUTPUT 'NO DATA' FOR THIS TICKER\n"
 
             # Price data
             price = data.get('price')
@@ -363,13 +405,42 @@ HOLDINGS:
 {holdings_text}
 
 RULES:
-1. Missing price → "TICKER|NO DATA|N/A|No price data|N/A"
-2. PENDING EXIT status → "TICKER|SELL|HIGH|Exit position|Capital preservation"
-3. Changed recommendation → Start REASON: "CHANGE FROM [prior] because [event]"
-4. Catalyst required: earnings date, analyst action (firm+date), contract, regulatory event, specific macro event
-5. BANNED: "thesis intact", "kills", "demands action", "unambiguous", "firing on all cylinders", "gift", "market is underreacting", "transformational"
-6. Confidence: HIGH = catalyst + aligned price + no binary risk | MEDIUM = no new catalyst OR binary risk | LOW = contradicting data
-7. Max words: REASON 80, RISK 50
+1. Identity not verified (⚠️) → "TICKER|NO DATA|N/A|Company identity could not be verified. Verify ticker symbol is correct.|N/A"
+2. Missing price → "TICKER|NO DATA|N/A|No price data|N/A"
+3. PENDING EXIT status → "TICKER|SELL|HIGH|Exit position|Capital preservation"
+4. Changed recommendation → Start REASON: "CHANGE FROM [prior] because [event]"
+5. Catalyst required: earnings date, analyst action (firm+date), contract, regulatory event, specific macro event
+6. BANNED: "thesis intact", "kills", "demands action", "unambiguous", "firing on all cylinders", "gift", "market is underreacting", "transformational"
+
+7. CONFIDENCE CALIBRATION RUBRIC (for BUY MORE recommendations):
+   Count how many of these 5 conditions are TRUE:
+   a) Strong analyst consensus: 2+ analysts with Buy/Outperform rating AND recent PT raise (last 60 days)
+   b) Recent earnings beat: Last quarterly report (within 60 days) beat on revenue or EPS
+   c) Macro tailwind: Direct relevance to today's macro context (specific, not generic)
+   d) Technical confirmation: Stock up today OR holding key support level (not down >3%)
+   e) No material unresolved risk: No dilution risk, sharp unexplained drop, or governance flag
+
+   Assign confidence:
+   - 3+ conditions true = HIGH confidence allowed
+   - 1-2 conditions true = Cap at MEDIUM (even if bullish)
+   - 0-1 conditions true = Cap at LOW
+
+   For HOLD: Always MEDIUM unless major risk → then LOW
+   For SELL/WATCH: Use HIGH if clear catalyst, MEDIUM if deteriorating, LOW if uncertain
+
+8. MANDATORY SELL EVALUATION TRIGGERS:
+   If a holding meets 2+ of these criteria, you MUST explicitly evaluate for SELL:
+   a) Down >8% single day with no positive news explaining it
+   b) Down >15% over last 5 trading days (if data available)
+   c) Large unexplained move (>10% either direction, <2 news articles)
+   d) Dilutive financing: offering/shelf prospectus with terms undisclosed or unfavorable
+   e) Governance red flag: AGM adjournment, material insider selling, restatement risk
+   f) Identity unconfirmed for 2+ consecutive days
+
+   When triggered: Evaluate whether to recommend SELL. If NOT selling, explicitly state why in REASON.
+   Example: "HOLD despite -12% week — pullback on sector rotation, fundamentals intact, next catalyst is [date/event]"
+
+9. Max words: REASON 80, RISK 50
 
 Output ONLY pipe lines:
 TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK
@@ -472,6 +543,132 @@ def update_position_status(ticker: str, recommendation: str, status_dict: Dict) 
     return status_dict.get(ticker, 'OPEN')
 
 
+def load_company_identity_cache() -> Dict:
+    """Load company identity verification cache"""
+    cache_file = 'company_identity_cache.json'
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                import json
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.warning(f"Error loading company identity cache: {e}")
+        return {}
+
+
+def save_company_identity_cache(cache: Dict):
+    """Save company identity verification cache"""
+    cache_file = 'company_identity_cache.json'
+    try:
+        import json
+        with open(cache_file, 'w') as f:
+            json.dump(cache, f, indent=2)
+        logger.info(f"Saved company identity cache with {len(cache)} tickers")
+    except Exception as e:
+        logger.error(f"Error saving company identity cache: {e}")
+
+
+def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[bool, Dict]:
+    """Verify company identity before analysis
+
+    Returns: (is_verified, identity_data)
+
+    identity_data contains:
+    - confirmed_name: str
+    - exchange: str
+    - business_description: str
+    - last_verified: str (date)
+    - verification_confidence: str (HIGH/MEDIUM/LOW)
+    - failed_verifications: int
+    """
+    from datetime import datetime, timedelta
+
+    # Check cache - if verified <7 days ago with HIGH confidence, return cached
+    if ticker in cache:
+        cached = cache[ticker]
+        last_verified_str = cached.get('last_verified', '')
+        try:
+            last_verified = datetime.strptime(last_verified_str, '%Y-%m-%d')
+            days_since = (datetime.now() - last_verified).days
+
+            if days_since < 7 and cached.get('verification_confidence') == 'HIGH':
+                logger.info(f"IDENTITY CACHE HIT: {ticker} verified {days_since} days ago")
+                return True, cached
+        except:
+            pass  # Cache entry invalid, re-verify
+
+    # Call Finnhub for official data
+    try:
+        time.sleep(0.1)  # Rate limiting
+        profile = finnhub_client.company_profile2(symbol=ticker)
+
+        if not profile:
+            logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} - no profile data returned")
+            return False, _record_failed_verification(ticker, cache)
+
+        name = profile.get('name', '').strip()
+        exchange = profile.get('exchange', '').strip()
+        country = profile.get('country', '').strip()
+        industry = profile.get('finnhubIndustry', '').strip()
+
+        # Validation checks
+        if not name or len(name) < 2:
+            logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} - invalid name: '{name}'")
+            return False, _record_failed_verification(ticker, cache)
+
+        if not exchange:
+            logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} - no exchange data")
+            return False, _record_failed_verification(ticker, cache)
+
+        # For Canadian tickers, verify exchange is correct
+        if ticker.endswith('.TO') or ticker.endswith('.V') or ticker.endswith('.CN'):
+            valid_exchanges = ['TSX', 'TSXV', 'CSE', 'TSX Venture Exchange', 'Canadian Securities Exchange']
+            if not any(ex in exchange for ex in valid_exchanges):
+                logger.warning(f"IDENTITY VERIFICATION WARNING: {ticker} expected Canadian exchange, got: {exchange}")
+                # Not a hard failure, but flag for review
+
+        # Build business description
+        business_description = industry if industry else f"{country} company"
+        if len(business_description) > 100:
+            business_description = business_description[:97] + "..."
+
+        # Success - cache the result
+        identity_data = {
+            'confirmed_name': name,
+            'exchange': exchange,
+            'business_description': business_description,
+            'last_verified': datetime.now().strftime('%Y-%m-%d'),
+            'verification_confidence': 'HIGH',
+            'failed_verifications': 0
+        }
+
+        cache[ticker] = identity_data
+        logger.info(f"IDENTITY VERIFIED: {ticker} = {name} ({exchange})")
+        return True, identity_data
+
+    except Exception as e:
+        logger.error(f"IDENTITY VERIFICATION ERROR: {ticker} - {e}")
+        return False, _record_failed_verification(ticker, cache)
+
+
+def _record_failed_verification(ticker: str, cache: Dict) -> Dict:
+    """Record a failed verification attempt"""
+    if ticker in cache:
+        cache[ticker]['failed_verifications'] = cache[ticker].get('failed_verifications', 0) + 1
+        logger.warning(f"IDENTITY: {ticker} has {cache[ticker]['failed_verifications']} failed verifications")
+    else:
+        cache[ticker] = {
+            'confirmed_name': 'UNVERIFIED',
+            'exchange': 'UNKNOWN',
+            'business_description': 'Identity could not be verified',
+            'last_verified': datetime.now().strftime('%Y-%m-%d'),
+            'verification_confidence': 'LOW',
+            'failed_verifications': 1
+        }
+    return cache[ticker]
+
+
 def load_recommendation_cache() -> Dict:
     """Load cache of recently recommended stocks to avoid repetition (for Opportunities)"""
     cache_file = 'recommendations_cache.json'
@@ -500,6 +697,385 @@ def save_recommendation_cache(cache: Dict):
         logger.info(f"Saved {len(cache)} tickers to recommendation cache")
     except Exception as e:
         logger.error(f"Error saving recommendation cache: {e}")
+
+
+def load_opportunity_scorecard() -> Dict:
+    """Load opportunity scorecard tracking last 7 days of recommendations"""
+    scorecard_file = 'opportunity_scorecard.json'
+    try:
+        if os.path.exists(scorecard_file):
+            with open(scorecard_file, 'r') as f:
+                import json
+                scorecard = json.load(f)
+                # Filter to last 7 days only
+                cutoff_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+                filtered = {date: opps for date, opps in scorecard.items() if date >= cutoff_date}
+                return filtered
+        return {}
+    except Exception as e:
+        logger.warning(f"Error loading opportunity scorecard: {e}")
+        return {}
+
+
+def save_opportunity_scorecard(scorecard: Dict):
+    """Save opportunity scorecard"""
+    scorecard_file = 'opportunity_scorecard.json'
+    try:
+        import json
+        with open(scorecard_file, 'w') as f:
+            json.dump(scorecard, f, indent=2)
+        total_opps = sum(len(opps) for opps in scorecard.values())
+        logger.info(f"Saved opportunity scorecard with {total_opps} opportunities across {len(scorecard)} days")
+    except Exception as e:
+        logger.error(f"Error saving opportunity scorecard: {e}")
+
+
+def add_opportunity_to_scorecard(ticker: str, price: float, catalyst: str, scorecard: Dict):
+    """Add a new opportunity to today's scorecard entry"""
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    if today not in scorecard:
+        scorecard[today] = []
+
+    # Check if ticker already in today's list
+    existing_tickers = [opp['ticker'] for opp in scorecard[today]]
+    if ticker not in existing_tickers:
+        scorecard[today].append({
+            'ticker': ticker,
+            'date_suggested': today,
+            'price_at_suggestion': price,
+            'catalyst': catalyst[:100],  # Truncate catalyst
+            'current_price': price,
+            'last_updated': today,
+            'gain_pct': 0.0,
+            'verdict': 'PENDING'
+        })
+        logger.info(f"SCORECARD: Added {ticker} at ${price:.2f}")
+
+
+def update_scorecard_prices(scorecard: Dict, finnhub_client) -> Dict:
+    """Update current prices for all opportunities in the scorecard"""
+    if not scorecard:
+        return scorecard
+
+    logger.info("Updating scorecard prices...")
+    today = datetime.now().strftime('%Y-%m-%d')
+    updated_count = 0
+
+    for date, opportunities in scorecard.items():
+        for opp in opportunities:
+            ticker = opp['ticker']
+            try:
+                time.sleep(0.2)  # Rate limiting
+                quote = finnhub_client.quote(ticker)
+                current_price = quote.get('c', 0)
+
+                if current_price > 0:
+                    opp['current_price'] = current_price
+                    opp['last_updated'] = today
+
+                    # Calculate gain percentage
+                    entry_price = opp['price_at_suggestion']
+                    gain_pct = ((current_price - entry_price) / entry_price) * 100
+                    opp['gain_pct'] = round(gain_pct, 2)
+
+                    # Assign verdict
+                    if gain_pct > 10:
+                        opp['verdict'] = 'HIT - strong gain'
+                    elif gain_pct > 0:
+                        opp['verdict'] = 'HIT - modest gain'
+                    elif gain_pct > -5:
+                        opp['verdict'] = 'FLAT - watch'
+                    elif gain_pct > -10:
+                        opp['verdict'] = 'MISS - small loss'
+                    else:
+                        opp['verdict'] = 'MISS - significant loss'
+
+                    updated_count += 1
+                    logger.debug(f"SCORECARD: {ticker} ${entry_price:.2f} → ${current_price:.2f} ({gain_pct:+.1f}%)")
+
+            except Exception as e:
+                logger.warning(f"SCORECARD: Could not update price for {ticker}: {e}")
+                continue
+
+    logger.info(f"SCORECARD: Updated {updated_count} opportunity prices")
+    return scorecard
+
+
+def generate_scorecard_summary(scorecard: Dict) -> str:
+    """Generate HTML table showing last 7 days of opportunity performance"""
+    if not scorecard:
+        return ""
+
+    # Flatten all opportunities and sort by date (newest first)
+    all_opps = []
+    for date, opportunities in scorecard.items():
+        all_opps.extend(opportunities)
+
+    if not all_opps:
+        return ""
+
+    # Sort by date suggested (newest first)
+    all_opps.sort(key=lambda x: x['date_suggested'], reverse=True)
+
+    # Limit to 15 most recent
+    all_opps = all_opps[:15]
+
+    html = """
+        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 30px;">
+            <h3 style="margin: 0 0 15px 0; color: #1e293b; font-size: 16px;">📊 Opportunity Scorecard (Last 7 Days)</h3>
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <thead>
+                    <tr style="background: #667eea; color: white;">
+                        <th style="padding: 10px; text-align: left;">Ticker</th>
+                        <th style="padding: 10px; text-align: left;">Date</th>
+                        <th style="padding: 10px; text-align: right;">Entry $</th>
+                        <th style="padding: 10px; text-align: right;">Now $</th>
+                        <th style="padding: 10px; text-align: right;">Gain %</th>
+                        <th style="padding: 10px; text-align: left;">Verdict</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+
+    for opp in all_opps:
+        ticker = opp['ticker']
+        date_short = datetime.strptime(opp['date_suggested'], '%Y-%m-%d').strftime('%b %d')
+        entry_price = f"${opp['price_at_suggestion']:.2f}"
+        current_price = f"${opp['current_price']:.2f}"
+        gain_pct = opp['gain_pct']
+        verdict = opp['verdict']
+
+        # Color coding
+        if gain_pct > 0:
+            gain_class = 'color: #10b981; font-weight: 700;'
+        elif gain_pct < 0:
+            gain_class = 'color: #ef4444; font-weight: 700;'
+        else:
+            gain_class = 'color: #64748b;'
+
+        gain_str = f"{gain_pct:+.1f}%"
+
+        html += f"""
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 8px; font-weight: 600;">{ticker}</td>
+                        <td style="padding: 8px;">{date_short}</td>
+                        <td style="padding: 8px; text-align: right;">{entry_price}</td>
+                        <td style="padding: 8px; text-align: right;">{current_price}</td>
+                        <td style="padding: 8px; text-align: right; {gain_class}">{gain_str}</td>
+                        <td style="padding: 8px; font-size: 12px;">{verdict}</td>
+                    </tr>
+"""
+
+    html += """
+                </tbody>
+            </table>
+        </div>
+"""
+
+    return html
+
+
+def detect_recommendation_changes(parsed_holdings: List[Dict]) -> List[Dict]:
+    """Detect which holdings had recommendation changes from prior day"""
+    changes = []
+
+    for h in parsed_holdings:
+        if h.get('changed'):
+            ticker = h['ticker']
+            prior_rec = h.get('prior_recommendation', 'N/A')
+            current_rec = h['recommendation']
+            prior_date = h.get('prior_date', 'Unknown')
+
+            # Extract trigger from reason (first 80 chars)
+            reason = h.get('reason', '')
+            trigger = reason[:80] + "..." if len(reason) > 80 else reason
+
+            changes.append({
+                'ticker': ticker,
+                'prior_rec': prior_rec,
+                'current_rec': current_rec,
+                'prior_date': prior_date,
+                'trigger': trigger
+            })
+
+    return changes
+
+
+def generate_change_log_table(changes: List[Dict]) -> str:
+    """Generate HTML table showing recommendation changes"""
+    if not changes:
+        return ""
+
+    html = """
+        <div style="background: #fff3cd; border-left: 4px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 12px 0; color: #1a202c; font-size: 16px;">⚠️ Recommendation Changes</h3>
+            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+                <thead>
+                    <tr style="border-bottom: 2px solid #fde68a;">
+                        <th style="padding: 8px; text-align: left; font-weight: 600;">Ticker</th>
+                        <th style="padding: 8px; text-align: left; font-weight: 600;">Was</th>
+                        <th style="padding: 8px; text-align: left; font-weight: 600;">Now</th>
+                        <th style="padding: 8px; text-align: left; font-weight: 600;">Trigger</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+
+    for change in changes:
+        html += f"""
+                    <tr style="border-bottom: 1px solid #fde68a;">
+                        <td style="padding: 6px 8px; font-weight: 600;">{change['ticker']}</td>
+                        <td style="padding: 6px 8px;">{change['prior_rec']}</td>
+                        <td style="padding: 6px 8px; font-weight: 600;">{change['current_rec']}</td>
+                        <td style="padding: 6px 8px; font-size: 12px;">{change['trigger']}</td>
+                    </tr>
+"""
+
+    html += """
+                </tbody>
+            </table>
+        </div>
+"""
+
+    return html
+
+
+def load_price_anomaly_log() -> Dict:
+    """Load price anomaly tracking log"""
+    log_file = 'price_anomaly_log.json'
+    try:
+        if os.path.exists(log_file):
+            with open(log_file, 'r') as f:
+                import json
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.warning(f"Error loading price anomaly log: {e}")
+        return {}
+
+
+def save_price_anomaly_log(log: Dict):
+    """Save price anomaly tracking log"""
+    log_file = 'price_anomaly_log.json'
+    try:
+        import json
+        with open(log_file, 'w') as f:
+            json.dump(log, f, indent=2)
+        logger.info(f"Saved price anomaly log for {len(log)} tickers")
+    except Exception as e:
+        logger.error(f"Error saving price anomaly log: {e}")
+
+
+def detect_price_anomalies(holdings_data: List[Dict], anomaly_log: Dict) -> List[Dict]:
+    """Detect >20% overnight price moves with no news
+
+    Returns list of anomalies with ticker, jump_pct, news_count
+    """
+    anomalies = []
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    for data in holdings_data:
+        ticker = data['ticker']
+        current_price = data.get('price')
+        news_count = len(data.get('headlines', []))
+
+        if current_price is None or current_price <= 0:
+            continue
+
+        # Get yesterday's price from log
+        if ticker in anomaly_log:
+            prior_price = anomaly_log[ticker].get('last_price')
+            prior_date = anomaly_log[ticker].get('last_date')
+
+            if prior_price and prior_price > 0:
+                # Calculate change percentage
+                change_pct = abs((current_price - prior_price) / prior_price) * 100
+
+                # Flag if >20% change with <2 news articles
+                if change_pct > 20 and news_count < 2:
+                    anomalies.append({
+                        'ticker': ticker,
+                        'from_price': prior_price,
+                        'to_price': current_price,
+                        'jump_pct': round(change_pct, 1),
+                        'news_count': news_count,
+                        'prior_date': prior_date
+                    })
+                    logger.warning(f"PRICE ANOMALY: {ticker} jumped {change_pct:.1f}% (${prior_price:.2f} → ${current_price:.2f}) with only {news_count} news")
+
+                    # Add to anomaly log
+                    if 'anomalies_logged' not in anomaly_log[ticker]:
+                        anomaly_log[ticker]['anomalies_logged'] = []
+                    anomaly_log[ticker]['anomalies_logged'].append({
+                        'date': today,
+                        'jump_pct': round(change_pct, 1),
+                        'from': prior_price,
+                        'to': current_price,
+                        'news_count': news_count,
+                        'flagged': True
+                    })
+
+        # Update today's price in log
+        if ticker not in anomaly_log:
+            anomaly_log[ticker] = {}
+
+        anomaly_log[ticker].update({
+            'last_price': current_price,
+            'last_date': today,
+            'prior_price': anomaly_log[ticker].get('last_price', current_price),
+            'prior_date': anomaly_log[ticker].get('last_date', today)
+        })
+
+    return anomalies
+
+
+def format_anomaly_warnings(anomalies: List[Dict]) -> str:
+    """Generate HTML warning box for price anomalies"""
+    if not anomalies:
+        return ""
+
+    html = """
+        <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 12px 0; color: #991b1b; font-size: 16px;">🚨 Price Anomaly Alert</h3>
+            <p style="margin: 0 0 12px 0; color: #7f1d1d; font-size: 14px;">The following positions had unusual price moves (>20%) with minimal news coverage. Verify data accuracy.</p>
+            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+                <thead>
+                    <tr style="border-bottom: 2px solid #fecaca;">
+                        <th style="padding: 8px; text-align: left; font-weight: 600;">Ticker</th>
+                        <th style="padding: 8px; text-align: right; font-weight: 600;">From</th>
+                        <th style="padding: 8px; text-align: right; font-weight: 600;">To</th>
+                        <th style="padding: 8px; text-align: right; font-weight: 600;">Jump %</th>
+                        <th style="padding: 8px; text-align: center; font-weight: 600;">News</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+
+    for anomaly in anomalies:
+        ticker = anomaly['ticker']
+        from_price = f"${anomaly['from_price']:.2f}"
+        to_price = f"${anomaly['to_price']:.2f}"
+        jump_pct = f"{anomaly['jump_pct']:.1f}%"
+        news_count = anomaly['news_count']
+
+        html += f"""
+                    <tr style="border-bottom: 1px solid #fecaca;">
+                        <td style="padding: 6px 8px; font-weight: 600;">{ticker}</td>
+                        <td style="padding: 6px 8px; text-align: right;">{from_price}</td>
+                        <td style="padding: 6px 8px; text-align: right;">{to_price}</td>
+                        <td style="padding: 6px 8px; text-align: right; font-weight: 700; color: #dc2626;">{jump_pct}</td>
+                        <td style="padding: 6px 8px; text-align: center;">{news_count}</td>
+                    </tr>
+"""
+
+    html += """
+                </tbody>
+            </table>
+        </div>
+"""
+
+    return html
 
 
 def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Dict]:
@@ -644,6 +1220,36 @@ Return ONLY a comma-separated list of ticker symbols. No explanations."""
     return trending_data
 
 
+def filter_conflicting_opportunities(trending_data: List[Dict], parsed_holdings: List[Dict]) -> List[Dict]:
+    """HARD EXCLUSION: Remove any ticker that has SELL or WATCH LOW in holdings today
+
+    Prevents contradictory recommendations (e.g., QUBT as both SELL and Opportunity same day)
+    """
+    # Build set of tickers to exclude
+    exclude_tickers = set()
+    for h in parsed_holdings:
+        rec = h['recommendation'].upper()
+        confidence = h.get('confidence', '').upper()
+
+        # Exclude if SELL or if WATCH with LOW confidence
+        if 'SELL' in rec:
+            exclude_tickers.add(h['ticker'])
+        elif 'WATCH' in rec and 'LOW' in confidence:
+            exclude_tickers.add(h['ticker'])
+
+    # Filter trending_data
+    filtered = []
+    for d in trending_data:
+        ticker = d.get('ticker', '')
+        if ticker not in exclude_tickers:
+            filtered.append(d)
+
+    if exclude_tickers:
+        logger.info(f"OPPORTUNITIES HARD EXCLUSION: Removed {len(exclude_tickers)} tickers with SELL/WATCH LOW: {exclude_tickers}")
+
+    return filtered
+
+
 def filter_opportunities_by_audit_rules(trending_data: List[Dict], current_holdings: List[str], holdings_themes: Dict[str, List[str]]) -> List[Dict]:
     """HARD FILTER: Remove opportunities that violate audit rules
 
@@ -660,10 +1266,17 @@ def filter_opportunities_by_audit_rules(trending_data: List[Dict], current_holdi
         change_pct = data.get('change_percent', 0)
         headlines = data.get('headlines', [])
 
-        # Rule 1: Exclude if up >8% with no meaningful news
-        if change_pct and change_pct > 8 and len(headlines) == 0:
-            logger.info(f"OPPORTUNITIES FILTER: Excluding {ticker} - up {change_pct:.1f}% with no news (price chasing)")
+        # Rule 1: SURGE FILTER
+        if change_pct and change_pct > 15:
+            # Hard exclude if >15% (mean-reversion risk too high)
+            logger.info(f"OPPORTUNITIES FILTER: Excluding {ticker} - SURGE >15% ({change_pct:.1f}%) - mean reversion risk")
             continue
+        elif change_pct and change_pct > 8:
+            # Flag 8-15% with surge warning
+            data['surge_warning'] = True
+            data['surge_pct'] = change_pct
+            logger.info(f"OPPORTUNITIES FILTER: Flagging {ticker} with SURGE WARNING +{change_pct:.1f}%")
+        # If <8%, no warning needed
 
         # Rule 2: Theme overlap check (simplified - just flag, don't exclude)
         # This would require more sophisticated theme detection
@@ -726,6 +1339,11 @@ def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -
             else:
                 trending_text += f"\n{ticker}: {price_str} {change_str}\n"
 
+            # Add surge warning if flagged
+            if data.get('surge_warning'):
+                surge_pct = data.get('surge_pct', 0)
+                trending_text += f"  ⚠️ SURGE WARNING: Up {surge_pct:.1f}% today - HIGH MEAN-REVERSION RISK\n"
+
             if headlines:
                 trending_text += f"  News: {'; '.join(headlines[:2])}\n"
 
@@ -775,23 +1393,37 @@ MANDATORY RULES:
    Compare to existing holdings. If it duplicates a theme (e.g., another semiconductor stock when we have AMAT, LRCX, MU),
    you MUST explain why this is better than adding to existing positions.
 
-5. ENTRY CONDITION:
+5. SURGE ENTRY WARNINGS:
+   - If candidate has "⚠️ SURGE WARNING" marking (up 8-15% today), you MAY still recommend it BUT:
+   - ENTRY field MUST include: "Wait for pullback to $[price]" or "PASS - too extended"
+   - Do NOT recommend buying at current levels if stock is up 8-15% without a strong fundamental catalyst
+   - Stocks >15% are already filtered out
+
+6. ENTRY CONDITION:
    Never recommend a stock that is up >5% today unless the catalyst is fundamental (earnings beat, major contract).
    Specify a better entry point or say "PASS - wait for pullback"
 
-6. BANNED PHRASES:
+7. BANNED PHRASES:
    "firing on all cylinders," "gift," "the market is underreacting," "transformational," "exploding," "surging"
 
-7. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
+8. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
    If ZERO candidates meet criteria, output:
    "No qualifying opportunities today - [reason: price chasing / theme overlap / no catalysts]"
 
 OUTPUT FORMAT (1-5 opportunities, or "No qualifying opportunities"):
-TICKER|COMPANY|CATALYST|EDGE|ENTRY|RISK|EXCHANGE
+TICKER|COMPANY|CATALYST|EDGE|ENTRY|TARGET|STOP|RISK|EXCHANGE
 
 CATALYST: Named event with date (30-50 words)
 EDGE: Why this vs. adding to existing position (20-30 words)
-ENTRY: Specific price level or "PASS - [reason]" (10-20 words)
+ENTRY: Specific price range or condition (be precise)
+  - Good: "Current price $45-47 acceptable" or "Wait for pullback to $38-40"
+  - Bad: "Review before buying" or "Current levels"
+TARGET: Analyst PT or thesis-based price objective
+  - Good: "Analyst PT $65 (Jefferies, Apr 28)" or "Fair value $58 based on 2.5x P/S"
+  - Bad: "Upside potential" or "Monitor"
+STOP: Price level where thesis is broken (below which you'd exit)
+  - Good: "Stop below $32 (breaks 200-day MA and support)"
+  - Bad: "Manage risk"
 RISK: One specific risk with trigger (20-30 words)
 EXCHANGE: TSX or US
 
@@ -850,7 +1482,9 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict], rec_histor
                 'risk': 'See logs',
                 'prior_recommendation': None,
                 'prior_date': None,
-                'status': position_status.get(data['ticker'], 'OPEN')
+                'status': position_status.get(data['ticker'], 'OPEN'),
+                'identity_verified': data.get('identity_verified', False),
+                'identity_data': data.get('identity_data', {})
             })
         return parsed
 
@@ -904,7 +1538,9 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict], rec_histor
                         'prior_recommendation': prior_rec,
                         'prior_date': prior_date,
                         'status': status,
-                        'changed': recommendation_changed
+                        'changed': recommendation_changed,
+                        'identity_verified': data_map[ticker_upper].get('identity_verified', False),
+                        'identity_data': data_map[ticker_upper].get('identity_data', {})
                     })
                     parsed_tickers.add(ticker_upper)
                 else:
@@ -933,8 +1569,8 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict], rec_histor
 
 
 def parse_opportunities(opportunities: str) -> List[Dict]:
-    """Parse Claude's opportunities with NEW AUDIT FORMAT
-    Format: TICKER|COMPANY|CATALYST|EDGE|ENTRY|RISK|EXCHANGE"""
+    """Parse Claude's opportunities with ENHANCED FORMAT
+    Format: TICKER|COMPANY|CATALYST|EDGE|ENTRY|TARGET|STOP|RISK|EXCHANGE"""
     parsed = []
 
     if opportunities == "OPPORTUNITIES_UNAVAILABLE":
@@ -948,21 +1584,18 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
 
     lines = opportunities.strip().split('\n')
 
-    # Skip header if present
-    header_pattern = "TICKER|COMPANY|CATALYST|EDGE|ENTRY|RISK|EXCHANGE"
-
     for line in lines:
         if '|' in line:
-            # Skip header
-            if line.strip().upper() == header_pattern.upper():
+            parts = line.split('|')
+
+            # Skip header lines
+            if len(parts) > 0 and parts[0].strip().upper() == "TICKER":
                 continue
 
-            parts = line.split('|')
-            if len(parts) >= 7:  # New format has 7 fields
+            if len(parts) >= 9:  # Enhanced format with TARGET and STOP
                 ticker = parts[0].strip()
                 company = parts[1].strip()
 
-                # Skip if ticker is empty or header
                 if not ticker or ticker.upper() == "TICKER":
                     continue
 
@@ -976,11 +1609,35 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                     'catalyst': parts[2].strip(),
                     'edge': parts[3].strip(),
                     'entry': entry,
+                    'target': parts[5].strip(),
+                    'stop': parts[6].strip(),
+                    'risk': parts[7].strip(),
+                    'exchange': parts[8].strip(),
+                    'is_pass': is_pass
+                })
+            elif len(parts) >= 7:  # Backward compatibility: 7-field format
+                ticker = parts[0].strip()
+                company = parts[1].strip()
+
+                if not ticker or ticker.upper() == "TICKER":
+                    continue
+
+                entry = parts[4].strip()
+                is_pass = "PASS" in entry.upper()
+
+                parsed.append({
+                    'ticker': ticker,
+                    'company': company,
+                    'catalyst': parts[2].strip(),
+                    'edge': parts[3].strip(),
+                    'entry': entry,
+                    'target': 'Monitor',  # Default for old format
+                    'stop': 'Manage risk',  # Default for old format
                     'risk': parts[5].strip(),
                     'exchange': parts[6].strip(),
-                    'is_pass': is_pass  # Flag if this is a PASS recommendation
+                    'is_pass': is_pass
                 })
-            elif len(parts) >= 6:  # Fallback to old format if needed
+            elif len(parts) >= 6:  # Fallback to oldest format if needed
                 ticker = parts[0].strip()
                 company = parts[1].strip()
 
@@ -990,9 +1647,11 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                 parsed.append({
                     'ticker': ticker,
                     'company': company,
-                    'catalyst': parts[2].strip(),  # Treat "why_today" as catalyst
+                    'catalyst': parts[2].strip(),
                     'edge': 'See catalyst',
                     'entry': 'Review before buying',
+                    'target': 'Monitor',
+                    'stop': 'Manage risk',
                     'risk': parts[4].strip() if len(parts) > 4 else 'N/A',
                     'exchange': parts[5].strip() if len(parts) > 5 else 'Unknown',
                     'is_pass': False
@@ -1010,7 +1669,7 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
     return parsed[:5]  # Limit to 5 (user preference with strict filters)
 
 
-def create_html_email(macro_context: str, holdings: List[Dict], opportunities: List[Dict], date_str: str) -> Tuple[str, str]:
+def create_html_email(macro_context: str, holdings: List[Dict], opportunities: List[Dict], date_str: str, scorecard: Optional[Dict] = None, recommendation_changes: Optional[List[Dict]] = None, price_anomalies: Optional[List[Dict]] = None) -> Tuple[str, str]:
     """Create HTML and plain text email content - AUDIT-COMPLIANT VERSION"""
 
     # Count recommendations by type (including new categories)
@@ -1295,7 +1954,18 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         <div class="header">
             <h1>📈 Portfolio Brief — {date_str} | {len(holdings)} positions</h1>
         </div>
+"""
 
+    # Insert price anomaly warning if anomalies detected
+    if price_anomalies:
+        anomaly_warning_html = format_anomaly_warnings(price_anomalies)
+        html += f"""
+        <div class="section">
+            {anomaly_warning_html}
+        </div>
+"""
+
+    html += """
         <div class="section">
             <h2>🌍 Macro Context</h2>
             <div class="macro-context">
@@ -1336,6 +2006,11 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             <h2>📊 Your Holdings</h2>
             <div class="rec-summary">{rec_summary}</div>
 """
+
+    # Insert change log if there are changes
+    if recommendation_changes:
+        change_log_html = generate_change_log_table(recommendation_changes)
+        html += change_log_html
 
     for h in holdings:
         rec_class = ''
@@ -1380,8 +2055,24 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         if status == 'PENDING EXIT':
             status_badge = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px;">PENDING EXIT</span>'
 
+        # Build identity line
+        identity_line = ''
+        if h.get('identity_verified'):
+            identity = h.get('identity_data', {})
+            company_name = identity.get('confirmed_name', '')
+            exchange = identity.get('exchange', '')
+            business_desc = identity.get('business_description', '')
+            # Truncate business description if too long
+            if len(business_desc) > 80:
+                business_desc = business_desc[:77] + "..."
+            identity_line = f'<div style="color: #059669; font-size: 11px; margin-bottom: 6px; border-left: 2px solid #10b981; padding-left: 8px;">✓ {company_name} ({exchange}) — {business_desc}</div>'
+        elif h.get('identity_verified') == False:
+            # Explicitly not verified
+            identity_line = f'<div style="color: #dc2626; font-size: 11px; margin-bottom: 6px; border-left: 2px solid #ef4444; padding-left: 8px;">⚠️ Identity could not be verified - check ticker symbol</div>'
+
         html += f"""
             <div class="stock-card">
+                {identity_line}
                 <div class="stock-header">
                     <span class="stock-ticker">{h['ticker']}</span>
                     <span class="stock-price">{price_str}</span>
@@ -1407,6 +2098,11 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
         <div class="section">
             <h2>🔥 Opportunities (Max 5, filtered for quality)</h2>
 """
+        # Insert scorecard if available
+        if scorecard:
+            scorecard_html = generate_scorecard_summary(scorecard)
+            html += scorecard_html
+
         for opp in opportunities:
             # Convert markdown **text** to HTML <strong>text</strong>
             import re
@@ -1414,6 +2110,8 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             company = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('company', ''))
             edge = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('edge', 'See catalyst'))
             entry = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('entry', 'Review before buying'))
+            target = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('target', 'Monitor'))
+            stop = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('stop', 'Manage risk'))
             risk = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('risk', 'N/A'))
             exchange = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('exchange', 'Unknown'))
 
@@ -1430,6 +2128,8 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
                 <p><strong>Catalyst:</strong> {catalyst}</p>
                 <p><strong>Edge vs. Holdings:</strong> {edge}</p>
                 <p><strong>Entry:</strong> {entry}</p>
+                <p><strong>Target:</strong> {target}</p>
+                <p><strong>Stop:</strong> {stop}</p>
                 <p><strong>Risk:</strong> {risk}</p>
                 <p><strong>Exchange:</strong> {exchange}</p>
             </div>
@@ -1606,10 +2306,13 @@ def run_portfolio_analysis():
     git_pull_updates()
 
     # Step 0.5: Load tracking systems
-    logger.info("Loading recommendation history and position status...")
+    logger.info("Loading recommendation history, position status, identity cache, scorecard, and anomaly log...")
     rec_history = load_recommendation_history()
     position_status = load_position_status()
-    logger.info(f"Loaded history for {len(rec_history)} tickers, status for {len(position_status)} positions")
+    identity_cache = load_company_identity_cache()
+    scorecard = load_opportunity_scorecard()
+    anomaly_log = load_price_anomaly_log()
+    logger.info(f"Loaded history for {len(rec_history)} tickers, status for {len(position_status)} positions, identity cache for {len(identity_cache)} tickers, scorecard with {sum(len(opps) for opps in scorecard.values())} opportunities, anomaly log for {len(anomaly_log)} tickers")
 
     # Step 1: Read holdings
     holdings = read_holdings()
@@ -1628,11 +2331,11 @@ def run_portfolio_analysis():
         logger.error(f"Error initializing API clients: {e}")
         return
 
-    # Step 3: Fetch data for all holdings
-    logger.info("Fetching data for holdings...")
+    # Step 3: Fetch data for all holdings (with identity verification)
+    logger.info("Fetching data for holdings and verifying identities...")
     holdings_data = []
     for ticker in holdings:
-        data = fetch_ticker_data(ticker, finnhub_client)
+        data = fetch_ticker_data(ticker, finnhub_client, identity_cache)
         if data:
             holdings_data.append(data)
             time.sleep(0.5)  # Rate limiting
@@ -1644,12 +2347,22 @@ def run_portfolio_analysis():
                 'price': None,
                 'change_percent': None,
                 'headlines': [],
-                'source': 'N/A'
+                'source': 'N/A',
+                'identity_verified': False,
+                'identity_data': {}
             })
 
     if not holdings_data:
         logger.error("No holdings data available. Aborting.")
         return
+
+    # Step 3.5: Detect price anomalies (>20% overnight moves with no news)
+    price_anomalies = detect_price_anomalies(holdings_data, anomaly_log)
+    if price_anomalies:
+        logger.warning(f"Detected {len(price_anomalies)} price anomalies")
+
+    # Step 3.6: Update scorecard prices for accountability tracking
+    scorecard = update_scorecard_prices(scorecard, finnhub_client)
 
     # Step 4: Analyze holdings with Claude (now includes rec_history and position_status)
     logger.info("Analyzing holdings with audit-compliant prompt...")
@@ -1665,13 +2378,24 @@ def run_portfolio_analysis():
 
     parsed_holdings = parse_holdings_analysis(analysis, holdings_data, rec_history, position_status)
 
-    # Save updated recommendation history and position status
+    # Detect recommendation changes for change log
+    recommendation_changes = detect_recommendation_changes(parsed_holdings)
+    if recommendation_changes:
+        logger.info(f"Detected {len(recommendation_changes)} recommendation changes")
+
+    # Save updated recommendation history, position status, identity cache, and anomaly log
     save_recommendation_history(rec_history)
     save_position_status(position_status)
+    save_company_identity_cache(identity_cache)
+    save_price_anomaly_log(anomaly_log)
 
     # Step 5: Find new opportunities (with hard filters)
     logger.info("Finding new opportunities with audit filters...")
     trending_data = get_trending_tickers(finnhub_client, holdings)
+
+    # Apply hard exclusion rule: no ticker with SELL or WATCH LOW in holdings
+    trending_data = filter_conflicting_opportunities(trending_data, parsed_holdings)
+
     opportunities_text, recommended_tickers = find_opportunities(trending_data, holdings)
 
     # DEBUG: Log Claude's raw response for opportunities
@@ -1683,6 +2407,17 @@ def run_portfolio_analysis():
     logger.info("="*60)
 
     parsed_opportunities = parse_opportunities(opportunities_text)
+
+    # Add new opportunities to scorecard for performance tracking
+    for opp in parsed_opportunities:
+        if not opp.get('is_pass'):  # Only track actual recommendations, not PASS
+            ticker = opp['ticker']
+            # Get price from trending_data
+            ticker_data = next((d for d in trending_data if d.get('ticker') == ticker), None)
+            if ticker_data and ticker_data.get('price'):
+                price = ticker_data['price']
+                catalyst = opp.get('catalyst', opp.get('why_today', 'N/A'))
+                add_opportunity_to_scorecard(ticker, price, catalyst, scorecard)
 
     # Update recommendation cache with new recommendations (for Opportunities tracking)
     if recommended_tickers:
@@ -1720,6 +2455,9 @@ def run_portfolio_analysis():
     if len(parsed_opportunities) == 0:
         logger.info("No opportunities found (may be intentional due to audit filters)")
 
+    # Save scorecard before creating email
+    save_opportunity_scorecard(scorecard)
+
     # Step 6: Create email
     logger.info("Creating email...")
     subject = f"📈 Portfolio Brief — {date_str} | {len(parsed_holdings)} positions"
@@ -1727,7 +2465,10 @@ def run_portfolio_analysis():
         macro_context,
         parsed_holdings,
         parsed_opportunities,
-        date_str
+        date_str,
+        scorecard,
+        recommendation_changes,
+        price_anomalies
     )
 
     # Step 7: Send email
