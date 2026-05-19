@@ -1269,44 +1269,47 @@ def filter_conflicting_opportunities(trending_data: List[Dict], parsed_holdings:
 
 
 def filter_opportunities_by_audit_rules(trending_data: List[Dict], current_holdings: List[str], holdings_themes: Dict[str, List[str]]) -> List[Dict]:
-    """HARD FILTER: Remove opportunities that violate audit rules
+    """TAG opportunities with filter warnings instead of excluding
 
-    Exclusion rules:
-    1. Stock up >8% today with no fundamental catalyst (just price momentum)
-    2. Duplicates existing portfolio theme without clear differentiation
-    3. Pre-revenue with <4 quarters cash runway (can't verify without financials, skip this rule)
-    4. OTC pink sheets (not applicable for Finnhub data)
+    Tagging rules:
+    1. Stock up >8% today - tag with SURGE warning
+    2. Stock up >15% today - tag with EXTREME SURGE warning
+    3. Duplicates existing portfolio theme - tag with OVERLAP warning
+    4. Recently recommended - tag with RECENT warning
     """
-    filtered = []
+    tagged = []
 
     for data in trending_data:
         ticker = data.get('ticker', '')
         change_pct = data.get('change_percent', 0)
         headlines = data.get('headlines', [])
 
+        # Initialize warning tags list
+        data['filter_warnings'] = []
+
         # Rule 1: SURGE FILTER
         if change_pct and change_pct > 15:
-            # Hard exclude if >15% (mean-reversion risk too high)
-            logger.info(f"OPPORTUNITIES FILTER: Excluding {ticker} - SURGE >15% ({change_pct:.1f}%) - mean reversion risk")
-            continue
+            data['filter_warnings'].append(f"⚠️ EXTREME SURGE +{change_pct:.1f}% - High mean-reversion risk")
+            logger.info(f"OPPORTUNITIES FILTER: Tagging {ticker} - EXTREME SURGE >15% ({change_pct:.1f}%)")
         elif change_pct and change_pct > 8:
-            # Flag 8-15% with surge warning
-            data['surge_warning'] = True
-            data['surge_pct'] = change_pct
-            logger.info(f"OPPORTUNITIES FILTER: Flagging {ticker} with SURGE WARNING +{change_pct:.1f}%")
-        # If <8%, no warning needed
+            data['filter_warnings'].append(f"⚠️ SURGE +{change_pct:.1f}% - Wait for pullback")
+            logger.info(f"OPPORTUNITIES FILTER: Tagging {ticker} - SURGE >8% ({change_pct:.1f}%)")
 
-        # Rule 2: Theme overlap check (simplified - just flag, don't exclude)
-        # This would require more sophisticated theme detection
+        # Rule 2: Theme overlap check
+        for theme_name, theme_tickers in holdings_themes.items():
+            if ticker in theme_tickers or any(ticker.startswith(t) for t in theme_tickers):
+                data['filter_warnings'].append(f"⚠️ OVERLAP - Already hold {theme_name}")
+                logger.info(f"OPPORTUNITIES FILTER: Tagging {ticker} - Theme overlap with {theme_name}")
+                break
 
-        filtered.append(data)
+        tagged.append(data)
 
-    return filtered[:15]  # Limit to 15 candidates
+    return tagged[:20]  # Limit to 20 candidates (increased from 15 to show more)
 
 
-def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -> Tuple[str, List[str]]:
-    """Find new opportunities with HARD AUDIT FILTERS
-    Returns: (response_text, list_of_recommended_tickers)"""
+def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -> Tuple[str, List[str], List[Dict]]:
+    """Find new opportunities with filter warnings
+    Returns: (response_text, list_of_recommended_tickers, tagged_trending_data)"""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -1323,22 +1326,23 @@ def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -
             'healthcare_biotech': ['LNTH', 'AXSM', 'MBX']
         }
 
-        # APPLY HARD FILTERS BEFORE Claude sees the data
-        filtered_trending = filter_opportunities_by_audit_rules(trending_data, current_holdings, holdings_themes)
+        # APPLY TAGGING (not exclusion) - tag opportunities with warnings
+        tagged_trending = filter_opportunities_by_audit_rules(trending_data, current_holdings, holdings_themes)
 
-        if len(filtered_trending) < 5:
-            logger.warning(f"Only {len(filtered_trending)} opportunities passed filters - may not reach 5")
-            return "No qualifying opportunities today - all candidates excluded by filters (price chasing or theme overlap)", []
+        if len(tagged_trending) == 0:
+            logger.warning("No trending data available for opportunities")
+            return "No trending data available today - market analysis unavailable", [], []
 
-        # Format filtered trending data WITH major catalyst detection
+        # Format tagged trending data WITH all filter warnings
         trending_text = ""
         major_catalyst_bypasses = []
 
-        for data in filtered_trending:
+        for data in tagged_trending:
             ticker = data.get('ticker', '')
             price = data.get('price')
             change = data.get('change_percent', 0)
             headlines = data.get('headlines', [])
+            filter_warnings = data.get('filter_warnings', [])
 
             price_str = f"${price:.2f}" if price is not None else "N/A"
             change_str = f"({change:+.2f}%)" if change is not None else "(N/A)"
@@ -1357,10 +1361,10 @@ def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -
             else:
                 trending_text += f"\n{ticker}: {price_str} {change_str}\n"
 
-            # Add surge warning if flagged
-            if data.get('surge_warning'):
-                surge_pct = data.get('surge_pct', 0)
-                trending_text += f"  ⚠️ SURGE WARNING: Up {surge_pct:.1f}% today - HIGH MEAN-REVERSION RISK\n"
+            # Add ALL filter warnings
+            if filter_warnings:
+                for warning in filter_warnings:
+                    trending_text += f"  {warning}\n"
 
             if headlines:
                 trending_text += f"  News: {'; '.join(headlines[:2])}\n"
@@ -1378,7 +1382,7 @@ def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -
 
         today = datetime.now().strftime('%B %d, %Y')
 
-        prompt = f"""You are finding new investment opportunities for a Canadian TFSA portfolio. STRICT FILTERING RULES APPLY.
+        prompt = f"""You are finding new investment opportunities for a Canadian TFSA portfolio. EVALUATE CANDIDATES WITH WARNINGS.
 
 Today is {today}.
 
@@ -1386,17 +1390,22 @@ CURRENT HOLDINGS BY THEME:
 {theme_summary}
 {recent_str}
 
-FILTERED TRENDING CANDIDATES (already excluded price-chasers >8% with no news):
+TRENDING CANDIDATES (may have filter warnings - evaluate carefully):
 {trending_text}
 
 MANDATORY RULES:
-1. Maximum 5 opportunities. Each MUST pass strict quality filters (below).
+1. Maximum 5 opportunities. Quality over quantity.
 
-2. RECENTLY RECOMMENDED CACHE BYPASS:
-   - Normally, recently recommended tickers are excluded
-   - EXCEPTION: If a cached ticker has "⚠️ CACHED BUT MAJOR CATALYST - BYPASS ALLOWED" marking,
-     you MAY re-recommend it IF there is a NEW, DIFFERENT, MAJOR catalyst (earnings beat, major contract, M&A, regulatory approval)
-   - Do NOT re-recommend for the same catalyst type or minor news updates
+2. FILTER WARNINGS - Candidates may have these tags:
+   - "⚠️ SURGE" (up 8-15%) or "⚠️ EXTREME SURGE" (up >15%) - High mean-reversion risk
+   - "⚠️ OVERLAP" - Already hold similar theme
+   - "⚠️ RECENT" - Recently recommended
+
+   You MAY recommend flagged candidates IF:
+   - There's a NEW, MAJOR fundamental catalyst (earnings beat, M&A, regulatory approval, major contract)
+   - The catalyst justifies the move or creates new entry opportunity
+   - For SURGE warnings: Either wait for pullback OR catalyst is strong enough to justify chase
+   - For OVERLAP warnings: Must explain why this is better than adding to existing position
 
 3. Each opportunity MUST have a NAMED CATALYST with a DATE:
    - "Earnings released today" with specific numbers
@@ -1411,22 +1420,16 @@ MANDATORY RULES:
    Compare to existing holdings. If it duplicates a theme (e.g., another semiconductor stock when we have AMAT, LRCX, MU),
    you MUST explain why this is better than adding to existing positions.
 
-5. SURGE ENTRY WARNINGS:
-   - If candidate has "⚠️ SURGE WARNING" marking (up 8-15% today), you MAY still recommend it BUT:
-   - ENTRY field MUST include: "Wait for pullback to $[price]" or "PASS - too extended"
-   - Do NOT recommend buying at current levels if stock is up 8-15% without a strong fundamental catalyst
-   - Stocks >15% are already filtered out
+5. ENTRY GUIDANCE FOR WARNED CANDIDATES:
+   - SURGE (8-15%): ENTRY must be "Wait for pullback to $[price]" unless catalyst is exceptional
+   - EXTREME SURGE (>15%): ENTRY should almost always be "PASS - too extended" or "Wait for 10-15% pullback"
+   - No warnings: "Current price $X-Y acceptable" if entry is reasonable
 
-6. ENTRY CONDITION:
-   Never recommend a stock that is up >5% today unless the catalyst is fundamental (earnings beat, major contract).
-   Specify a better entry point or say "PASS - wait for pullback"
-
-7. BANNED PHRASES:
+6. BANNED PHRASES:
    "firing on all cylinders," "gift," "the market is underreacting," "transformational," "exploding," "surging"
 
-8. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
-   If ZERO candidates meet criteria, output:
-   "No qualifying opportunities today - [reason: price chasing / theme overlap / no catalysts]"
+7. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
+   You should find opportunities even with warnings IF catalysts justify them.
 
 OUTPUT FORMAT (1-5 opportunities, or "No qualifying opportunities"):
 TICKER|COMPANY|CATALYST|EDGE|ENTRY|TARGET|STOP|RISK|EXCHANGE
@@ -1465,7 +1468,7 @@ Start immediately with first ticker or "No qualifying opportunities today"."""
         # Check if response says no opportunities
         if "no qualifying opportunities" in response.lower():
             logger.info("Claude found no qualifying opportunities after filtering")
-            return response, []
+            return response, [], tagged_trending
 
         for line in lines:
             if '|' in line:
@@ -1475,11 +1478,11 @@ Start immediately with first ticker or "No qualifying opportunities today"."""
                     if ticker and ticker != "TICKER":
                         recommended_tickers.append(ticker)
 
-        return response, recommended_tickers
+        return response, recommended_tickers, tagged_trending
 
     except Exception as e:
         logger.error(f"Error finding opportunities: {e}")
-        return "OPPORTUNITIES_UNAVAILABLE", []
+        return "OPPORTUNITIES_UNAVAILABLE", [], []
 
 
 def parse_holdings_analysis(analysis: str, holdings_data: List[Dict], rec_history: Dict, position_status: Dict) -> List[Dict]:
@@ -1586,8 +1589,8 @@ def parse_holdings_analysis(analysis: str, holdings_data: List[Dict], rec_histor
     return parsed
 
 
-def parse_opportunities(opportunities: str) -> List[Dict]:
-    """Parse Claude's opportunities with ENHANCED FORMAT
+def parse_opportunities(opportunities: str, tagged_trending: List[Dict] = None) -> List[Dict]:
+    """Parse Claude's opportunities with ENHANCED FORMAT and match filter warnings
     Format: TICKER|COMPANY|CATALYST|EDGE|ENTRY|TARGET|STOP|RISK|EXCHANGE"""
     parsed = []
 
@@ -1599,6 +1602,15 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
     if "no qualifying opportunities" in opportunities.lower():
         logger.info("No qualifying opportunities found (filter enforced)")
         return []
+
+    # Build ticker -> warnings lookup from tagged_trending
+    warnings_lookup = {}
+    if tagged_trending:
+        for data in tagged_trending:
+            ticker = data.get('ticker', '').upper()
+            warnings = data.get('filter_warnings', [])
+            if warnings:
+                warnings_lookup[ticker] = warnings
 
     lines = opportunities.strip().split('\n')
 
@@ -1621,6 +1633,9 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                 entry = parts[4].strip()
                 is_pass = "PASS" in entry.upper()
 
+                # Match filter warnings from tagged_trending
+                filter_warnings = warnings_lookup.get(ticker.upper(), [])
+
                 parsed.append({
                     'ticker': ticker,
                     'company': company,
@@ -1631,7 +1646,8 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                     'stop': parts[6].strip(),
                     'risk': parts[7].strip(),
                     'exchange': parts[8].strip(),
-                    'is_pass': is_pass
+                    'is_pass': is_pass,
+                    'filter_warnings': filter_warnings
                 })
             elif len(parts) >= 7:  # Backward compatibility: 7-field format
                 ticker = parts[0].strip()
@@ -1643,6 +1659,9 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                 entry = parts[4].strip()
                 is_pass = "PASS" in entry.upper()
 
+                # Match filter warnings
+                filter_warnings = warnings_lookup.get(ticker.upper(), [])
+
                 parsed.append({
                     'ticker': ticker,
                     'company': company,
@@ -1653,7 +1672,8 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                     'stop': 'Manage risk',  # Default for old format
                     'risk': parts[5].strip(),
                     'exchange': parts[6].strip(),
-                    'is_pass': is_pass
+                    'is_pass': is_pass,
+                    'filter_warnings': filter_warnings
                 })
             elif len(parts) >= 6:  # Fallback to oldest format if needed
                 ticker = parts[0].strip()
@@ -1661,6 +1681,9 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
 
                 if not ticker or ticker.upper() == "TICKER":
                     continue
+
+                # Match filter warnings
+                filter_warnings = warnings_lookup.get(ticker.upper(), [])
 
                 parsed.append({
                     'ticker': ticker,
@@ -1672,7 +1695,8 @@ def parse_opportunities(opportunities: str) -> List[Dict]:
                     'stop': 'Manage risk',
                     'risk': parts[4].strip() if len(parts) > 4 else 'N/A',
                     'exchange': parts[5].strip() if len(parts) > 5 else 'Unknown',
-                    'is_pass': False
+                    'is_pass': False,
+                    'filter_warnings': filter_warnings
                 })
 
     # Validation
@@ -2133,15 +2157,30 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
             risk = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('risk', 'N/A'))
             exchange = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('exchange', 'Unknown'))
 
-            # Check if this is a PASS recommendation
+            # Build badges for PASS and filter warnings
+            badges = ''
             is_pass = opp.get('is_pass', False)
-            pass_badge = ''
             if is_pass:
-                pass_badge = '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; margin-left: 8px;">PASS - WAIT</span>'
+                badges += '<span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; margin-left: 8px;">PASS - WAIT</span>'
+
+            # Add filter warning badges
+            filter_warnings = opp.get('filter_warnings', [])
+            if filter_warnings:
+                for warning in filter_warnings:
+                    # Different colors for different warning types
+                    if 'EXTREME SURGE' in warning:
+                        badge_color = 'background: #fee2e2; color: #991b1b;'  # Red
+                    elif 'SURGE' in warning:
+                        badge_color = 'background: #fef3c7; color: #78350f;'  # Yellow
+                    elif 'OVERLAP' in warning:
+                        badge_color = 'background: #e0e7ff; color: #3730a3;'  # Blue
+                    else:
+                        badge_color = 'background: #f1f5f9; color: #475569;'  # Gray
+                    badges += f'<span style="{badge_color} padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-left: 8px;">{warning}</span>'
 
             html += f"""
             <div class="opportunity-card">
-                <div class="ticker">{opp['ticker']}{pass_badge}</div>
+                <div class="ticker">{opp['ticker']}{badges}</div>
                 <h3>{company}</h3>
                 <p><strong>Catalyst:</strong> {catalyst}</p>
                 <p><strong>Edge vs. Holdings:</strong> {edge}</p>
@@ -2414,7 +2453,7 @@ def run_portfolio_analysis():
     # Apply hard exclusion rule: no ticker with SELL or WATCH LOW in holdings
     trending_data = filter_conflicting_opportunities(trending_data, parsed_holdings)
 
-    opportunities_text, recommended_tickers = find_opportunities(trending_data, holdings)
+    opportunities_text, recommended_tickers, tagged_trending = find_opportunities(trending_data, holdings)
 
     # DEBUG: Log Claude's raw response for opportunities
     logger.info("="*60)
@@ -2424,7 +2463,7 @@ def run_portfolio_analysis():
     logger.info(f"Response preview (first 800 chars):\n{opportunities_text[:800]}")
     logger.info("="*60)
 
-    parsed_opportunities = parse_opportunities(opportunities_text)
+    parsed_opportunities = parse_opportunities(opportunities_text, tagged_trending)
 
     # Add new opportunities to scorecard for performance tracking
     for opp in parsed_opportunities:
