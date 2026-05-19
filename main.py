@@ -570,7 +570,7 @@ def save_company_identity_cache(cache: Dict):
 
 
 def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[bool, Dict]:
-    """Verify company identity before analysis
+    """Verify company identity before analysis - auto-detects exchange suffix
 
     Returns: (is_verified, identity_data)
 
@@ -578,6 +578,7 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
     - confirmed_name: str
     - exchange: str
     - business_description: str
+    - canonical_ticker: str (may include exchange suffix like .TO)
     - last_verified: str (date)
     - verification_confidence: str (HIGH/MEDIUM/LOW)
     - failed_verifications: int
@@ -598,58 +599,75 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
         except:
             pass  # Cache entry invalid, re-verify
 
-    # Call Finnhub for official data
-    try:
-        time.sleep(0.1)  # Rate limiting
-        profile = finnhub_client.company_profile2(symbol=ticker)
+    # Try multiple ticker formats (auto-detect exchange)
+    ticker_variants = [ticker]
 
-        if not profile:
-            logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} - no profile data returned")
-            return False, _record_failed_verification(ticker, cache)
+    # If ticker has no suffix, try common Canadian exchanges
+    if '.' not in ticker:
+        ticker_variants.append(f"{ticker}.TO")  # TSX
+        ticker_variants.append(f"{ticker}.V")   # TSX Venture
 
-        name = profile.get('name', '').strip()
-        exchange = profile.get('exchange', '').strip()
-        country = profile.get('country', '').strip()
-        industry = profile.get('finnhubIndustry', '').strip()
+    last_error = None
 
-        # Validation checks
-        if not name or len(name) < 2:
-            logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} - invalid name: '{name}'")
-            return False, _record_failed_verification(ticker, cache)
+    for ticker_variant in ticker_variants:
+        try:
+            time.sleep(0.1)  # Rate limiting
+            profile = finnhub_client.company_profile2(symbol=ticker_variant)
 
-        if not exchange:
-            logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} - no exchange data")
-            return False, _record_failed_verification(ticker, cache)
+            if not profile:
+                logger.debug(f"No profile data for {ticker_variant}, trying next variant...")
+                continue
 
-        # For Canadian tickers, verify exchange is correct
-        if ticker.endswith('.TO') or ticker.endswith('.V') or ticker.endswith('.CN'):
-            valid_exchanges = ['TSX', 'TSXV', 'CSE', 'TSX Venture Exchange', 'Canadian Securities Exchange']
-            if not any(ex in exchange for ex in valid_exchanges):
-                logger.warning(f"IDENTITY VERIFICATION WARNING: {ticker} expected Canadian exchange, got: {exchange}")
-                # Not a hard failure, but flag for review
+            name = profile.get('name', '').strip()
+            exchange = profile.get('exchange', '').strip()
+            country = profile.get('country', '').strip()
+            industry = profile.get('finnhubIndustry', '').strip()
 
-        # Build business description
-        business_description = industry if industry else f"{country} company"
-        if len(business_description) > 100:
-            business_description = business_description[:97] + "..."
+            # Validation checks
+            if not name or len(name) < 2:
+                logger.debug(f"Invalid name for {ticker_variant}: '{name}', trying next variant...")
+                continue
 
-        # Success - cache the result
-        identity_data = {
-            'confirmed_name': name,
-            'exchange': exchange,
-            'business_description': business_description,
-            'last_verified': datetime.now().strftime('%Y-%m-%d'),
-            'verification_confidence': 'HIGH',
-            'failed_verifications': 0
-        }
+            if not exchange:
+                logger.debug(f"No exchange data for {ticker_variant}, trying next variant...")
+                continue
 
-        cache[ticker] = identity_data
-        logger.info(f"IDENTITY VERIFIED: {ticker} = {name} ({exchange})")
-        return True, identity_data
+            # SUCCESS - Found valid company data
+            # Build business description
+            business_description = industry if industry else f"{country} company"
+            if len(business_description) > 100:
+                business_description = business_description[:97] + "..."
 
-    except Exception as e:
-        logger.error(f"IDENTITY VERIFICATION ERROR: {ticker} - {e}")
-        return False, _record_failed_verification(ticker, cache)
+            # Cache the result with canonical ticker
+            identity_data = {
+                'confirmed_name': name,
+                'exchange': exchange,
+                'business_description': business_description,
+                'canonical_ticker': ticker_variant,  # Store which format worked
+                'last_verified': datetime.now().strftime('%Y-%m-%d'),
+                'verification_confidence': 'HIGH',
+                'failed_verifications': 0
+            }
+
+            cache[ticker] = identity_data
+
+            if ticker_variant != ticker:
+                logger.info(f"IDENTITY VERIFIED: {ticker} → {ticker_variant} = {name} ({exchange})")
+            else:
+                logger.info(f"IDENTITY VERIFIED: {ticker} = {name} ({exchange})")
+
+            return True, identity_data
+
+        except Exception as e:
+            logger.debug(f"Error checking {ticker_variant}: {e}")
+            last_error = e
+            continue  # Try next variant
+
+    # All variants failed
+    logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} (tried {len(ticker_variants)} variants)")
+    if last_error:
+        logger.error(f"Last error: {last_error}")
+    return False, _record_failed_verification(ticker, cache)
 
 
 def _record_failed_verification(ticker: str, cache: Dict) -> Dict:
