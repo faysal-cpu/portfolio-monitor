@@ -585,6 +585,20 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
     """
     from datetime import datetime, timedelta
 
+    # Clear stale failed verifications (LOW confidence older than 1 day)
+    # This ensures failed attempts are retried daily with exchange auto-detection
+    if ticker in cache:
+        cached = cache[ticker]
+        if cached.get('verification_confidence') == 'LOW':
+            try:
+                last_verified = datetime.strptime(cached.get('last_verified', ''), '%Y-%m-%d')
+                days_since = (datetime.now() - last_verified).days
+                if days_since >= 1:
+                    logger.info(f"CLEARING STALE FAILED CACHE: {ticker} (failed {days_since} days ago, will retry)")
+                    del cache[ticker]
+            except:
+                pass
+
     # Check cache - if verified <7 days ago with HIGH confidence, return cached
     if ticker in cache:
         cached = cache[ticker]
@@ -606,7 +620,9 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
     if '.' not in ticker:
         ticker_variants.append(f"{ticker}.TO")  # TSX
         ticker_variants.append(f"{ticker}.V")   # TSX Venture
+        ticker_variants.append(f"{ticker}.CN")  # Canadian Securities Exchange
 
+    logger.info(f"IDENTITY VERIFICATION: Will try {len(ticker_variants)} variants for {ticker}: {ticker_variants}")
     last_error = None
 
     for ticker_variant in ticker_variants:
