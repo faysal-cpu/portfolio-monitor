@@ -197,6 +197,53 @@ Your first character must be the emoji. No text before it."""
         return "🛢️ COMMODITIES & ENERGY: Error fetching data\n💰 RATES & TECH: Error fetching data\n🌍 GEOPOLITICS & DEFENSE: Error fetching data"
 
 
+def fetch_alpha_vantage_company_info(ticker: str) -> Optional[Dict]:
+    """Fetch company info from Alpha Vantage (for Canadian TSX/CSE stocks)"""
+    if not ALPHA_VANTAGE_API_KEY:
+        return None
+
+    try:
+        # Try Canadian exchange suffixes: .TO (TSX), .V (Venture), .CN (CSE)
+        symbols_to_try = [f"{ticker}.TO", f"{ticker}.V", f"{ticker}.CN"]
+
+        for symbol in symbols_to_try:
+            try:
+                url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={ALPHA_VANTAGE_API_KEY}"
+                response = requests.get(url, timeout=10)
+                data = response.json()
+
+                # Check if we got valid company data
+                if data and 'Symbol' in data and data.get('Name'):
+                    name = data.get('Name', '').strip()
+                    exchange = data.get('Exchange', '').strip()
+                    description = data.get('Description', '')
+                    industry = data.get('Industry', '')
+
+                    if name and len(name) > 1:
+                        logger.info(f"✓ Alpha Vantage company info for {ticker} (as {symbol}): {name} ({exchange})")
+
+                        # Build business description
+                        business_description = industry if industry else description[:100] if description else f"{exchange} company"
+
+                        return {
+                            'confirmed_name': name,
+                            'exchange': exchange,
+                            'business_description': business_description,
+                            'canonical_ticker': symbol,
+                            'source': 'Alpha Vantage'
+                        }
+
+                time.sleep(12)  # Alpha Vantage free tier: 5 calls/min
+            except Exception as e:
+                logger.warning(f"Alpha Vantage company info attempt failed for {symbol}: {e}")
+                continue
+
+        return None
+    except Exception as e:
+        logger.error(f"Alpha Vantage company info error for {ticker}: {e}")
+        return None
+
+
 def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
     """Fetch price data from Alpha Vantage as fallback (for Canadian TSX/CSE stocks)"""
     if not ALPHA_VANTAGE_API_KEY:
@@ -679,10 +726,33 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
             last_error = e
             continue  # Try next variant
 
-    # All variants failed
-    logger.warning(f"IDENTITY VERIFICATION FAILED: {ticker} (tried {len(ticker_variants)} variants)")
+    # All Finnhub variants failed - try Alpha Vantage fallback for Canadian stocks
+    logger.warning(f"IDENTITY VERIFICATION FAILED on Finnhub: {ticker} (tried {len(ticker_variants)} variants)")
     if last_error:
-        logger.error(f"Last error: {last_error}")
+        logger.error(f"Last Finnhub error: {last_error}")
+
+    # Try Alpha Vantage as fallback (supports Canadian TSX stocks on free tier)
+    logger.info(f"Trying Alpha Vantage fallback for {ticker}...")
+    av_company_info = fetch_alpha_vantage_company_info(ticker)
+
+    if av_company_info:
+        # Success with Alpha Vantage
+        identity_data = {
+            'confirmed_name': av_company_info['confirmed_name'],
+            'exchange': av_company_info['exchange'],
+            'business_description': av_company_info['business_description'],
+            'canonical_ticker': av_company_info['canonical_ticker'],
+            'last_verified': datetime.now().strftime('%Y-%m-%d'),
+            'verification_confidence': 'HIGH',
+            'failed_verifications': 0
+        }
+
+        cache[ticker] = identity_data
+        logger.info(f"IDENTITY VERIFIED via Alpha Vantage: {ticker} → {av_company_info['canonical_ticker']} = {av_company_info['confirmed_name']} ({av_company_info['exchange']})")
+        return True, identity_data
+
+    # Both Finnhub and Alpha Vantage failed
+    logger.error(f"IDENTITY VERIFICATION FAILED: {ticker} (Finnhub and Alpha Vantage both failed)")
     return False, _record_failed_verification(ticker, cache)
 
 
