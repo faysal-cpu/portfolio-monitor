@@ -30,6 +30,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Canadian ticker mapping - automatically append exchange suffix
+CANADIAN_TICKER_MAP = {
+    'LUN': 'LUN.TO',   # Lundin Mining (TSX)
+    'MAL': 'MAL.TO',   # Magellan Aerospace (TSX)
+    'XEQT': 'XEQT.TO', # iShares Core Equity ETF (TSX)
+    'FLT': 'FLT.TO',   # Volatus Aerospace (TSX)
+    'MDA': 'MDA.TO',   # MDA Space (TSX)
+    'HBM': 'HBM.TO',   # Hudbay Minerals (TSX)
+    'TRI': 'TRI.TO',   # Thomson Reuters (TSX)
+    'SU': 'SU.TO',     # Suncor Energy (TSX)
+    'CNQ': 'CNQ.TO'    # Canadian Natural Resources (TSX)
+}
+
+def normalize_ticker(ticker: str) -> str:
+    """Normalize ticker to include exchange suffix if Canadian"""
+    return CANADIAN_TICKER_MAP.get(ticker.upper(), ticker)
+
 # Load environment variables - AUTO-DETECT PATH
 # Get the directory where main.py is located (works on both Windows and Linux)
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -459,21 +476,30 @@ RULES:
 5. Catalyst required: earnings date, analyst action (firm+date), contract, regulatory event, specific macro event
 6. BANNED: "thesis intact", "kills", "demands action", "unambiguous", "firing on all cylinders", "gift", "market is underreacting", "transformational"
 
-7. CONFIDENCE CALIBRATION RUBRIC (for BUY MORE recommendations):
-   Count how many of these 5 conditions are TRUE:
+7. CONFIDENCE CALIBRATION RUBRIC (STRICTLY ENFORCED):
+   For BUY MORE recommendations, count how many of these 5 conditions are TRUE:
    a) Strong analyst consensus: 2+ analysts with Buy/Outperform rating AND recent PT raise (last 60 days)
    b) Recent earnings beat: Last quarterly report (within 60 days) beat on revenue or EPS
    c) Macro tailwind: Direct relevance to today's macro context (specific, not generic)
    d) Technical confirmation: Stock up today OR holding key support level (not down >3%)
    e) No material unresolved risk: No dilution risk, sharp unexplained drop, or governance flag
 
-   Assign confidence:
-   - 3+ conditions true = HIGH confidence allowed
-   - 1-2 conditions true = Cap at MEDIUM (even if bullish)
-   - 0-1 conditions true = Cap at LOW
+   STRICT Assignment Rules:
+   - 4+ conditions true = HIGH confidence (exceptional conviction)
+   - 2-3 conditions true = MEDIUM confidence (balanced view)
+   - 0-1 conditions true = LOW confidence (limited support) OR downgrade to HOLD
 
-   For HOLD: Always MEDIUM unless major risk → then LOW
-   For SELL/WATCH: Use HIGH if clear catalyst, MEDIUM if deteriorating, LOW if uncertain
+   For HOLD recommendations:
+   - MEDIUM confidence is default for stable positions with no clear catalyst
+   - LOW confidence if major unresolved risk present (dilution, governance, sharp drop unexplained)
+   - HIGH confidence should be RARE for HOLD (only if all fundamentals strong but just lacks catalyst)
+
+   For SELL/WATCH:
+   - HIGH confidence if 2+ sell triggers met with clear catalyst
+   - MEDIUM confidence if deteriorating trend
+   - LOW confidence if only minor concerns
+
+   DO NOT default everything to MEDIUM. Differentiate clearly.
 
 8. MANDATORY SELL EVALUATION TRIGGERS:
    If a holding meets 2+ of these criteria, you MUST explicitly evaluate for SELL:
@@ -632,6 +658,11 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
     """
     from datetime import datetime, timedelta
 
+    # Normalize Canadian tickers first (add .TO suffix if needed)
+    normalized_ticker = normalize_ticker(ticker)
+    if normalized_ticker != ticker:
+        logger.info(f"TICKER NORMALIZATION: {ticker} → {normalized_ticker}")
+
     # Clear stale failed verifications (LOW confidence older than 1 day)
     # This ensures failed attempts are retried daily with exchange auto-detection
     if ticker in cache:
@@ -660,12 +691,13 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
         except:
             pass  # Cache entry invalid, re-verify
 
-    # Try multiple ticker formats (auto-detect exchange)
-    ticker_variants = [ticker]
+    # Try normalized ticker first (handles Canadian .TO mapping), then variants
+    ticker_variants = [normalized_ticker] if normalized_ticker != ticker else [ticker]
 
-    # If ticker has no suffix, try common Canadian exchanges
+    # If base ticker has no suffix, try common Canadian exchanges
     if '.' not in ticker:
-        ticker_variants.append(f"{ticker}.TO")  # TSX
+        if f"{ticker}.TO" not in ticker_variants:
+            ticker_variants.append(f"{ticker}.TO")  # TSX
         ticker_variants.append(f"{ticker}.V")   # TSX Venture
         ticker_variants.append(f"{ticker}.CN")  # Canadian Securities Exchange
 
@@ -1472,6 +1504,15 @@ def find_opportunities(trending_data: List[Dict], current_holdings: List[str]) -
 
 Today is {today}.
 
+CRITICAL: DO NOT use macro context or sector themes to select opportunities. Ignore today's macro narrative completely during candidate selection. Your screening criteria should be PURELY STOCK-SPECIFIC SIGNALS:
+- Analyst upgrades or price target raises (with firm name and date)
+- Earnings beats (with specific numbers and date)
+- Unusual volume or technical breakouts (with chart levels)
+- Strong buyback announcements (with dollar amount and date)
+- M&A activity or major contracts (with deal size and date)
+
+Select the 5 best individual stock opportunities based ONLY on these stock-specific catalysts, from ANY sector. No sector bias. No macro weighting. Macro context can appear in your ANALYSIS of an opportunity after it's selected, but NOT in the selection itself.
+
 CURRENT HOLDINGS BY THEME:
 {theme_summary}
 {recent_str}
@@ -1480,7 +1521,7 @@ TRENDING CANDIDATES (may have filter warnings - evaluate carefully):
 {trending_text}
 
 MANDATORY RULES:
-1. Maximum 5 opportunities. Quality over quantity.
+1. Maximum 5 opportunities. Quality over quantity. Select based on stock-specific catalysts ONLY, not sector themes.
 
 2. FILTER WARNINGS - Candidates may have these tags:
    - "⚠️ SURGE" (up 8-15%) or "⚠️ EXTREME SURGE" (up >15%) - High mean-reversion risk
@@ -1511,10 +1552,16 @@ MANDATORY RULES:
    - EXTREME SURGE (>15%): ENTRY should almost always be "PASS - too extended" or "Wait for 10-15% pullback"
    - No warnings: "Current price $X-Y acceptable" if entry is reasonable
 
-6. BANNED PHRASES:
+6. PRICE TARGET VALIDATION (CRITICAL):
+   - If current price > analyst price target: DO NOT recommend as a BUY opportunity
+   - Instead, either SKIP the ticker entirely OR label ENTRY as "EXTENDED — wait for pullback to $[price]"
+   - Example: If stock at $156 and analyst PT is $150, this is NOT an actionable entry
+   - Only recommend stocks trading BELOW their primary analyst PT with clear upside remaining
+
+7. BANNED PHRASES:
    "firing on all cylinders," "gift," "the market is underreacting," "transformational," "exploding," "surging"
 
-7. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
+8. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
    You should find opportunities even with warnings IF catalysts justify them.
 
 OUTPUT FORMAT (1-5 opportunities, or "No qualifying opportunities"):
