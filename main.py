@@ -217,17 +217,29 @@ Your first character must be the emoji. No text before it."""
 def fetch_alpha_vantage_company_info(ticker: str) -> Optional[Dict]:
     """Fetch company info from Alpha Vantage (for Canadian TSX/CSE stocks)"""
     if not ALPHA_VANTAGE_API_KEY:
+        logger.error(f"❌ Alpha Vantage API key not set - cannot fetch company info for {ticker}")
         return None
 
     try:
         # Try Canadian exchange suffixes: .TO (TSX), .V (Venture), .CN (CSE)
         symbols_to_try = [f"{ticker}.TO", f"{ticker}.V", f"{ticker}.CN"]
+        logger.info(f"Alpha Vantage company info: trying {symbols_to_try} for {ticker}")
 
-        for symbol in symbols_to_try:
+        for idx, symbol in enumerate(symbols_to_try):
             try:
                 url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={ALPHA_VANTAGE_API_KEY}"
-                response = requests.get(url, timeout=10)
+                response = requests.get(url, timeout=15)
+                response.raise_for_status()  # Raise error for bad status codes
                 data = response.json()
+
+                # Check for API rate limit message
+                if 'Note' in data or 'Information' in data:
+                    error_msg = data.get('Note') or data.get('Information')
+                    logger.warning(f"⚠ Alpha Vantage API message for {symbol}: {error_msg}")
+                    if 'call frequency' in error_msg.lower() or 'per minute' in error_msg.lower():
+                        logger.error(f"❌ Rate limit hit on Alpha Vantage - sleeping 60s")
+                        time.sleep(60)  # Wait a full minute if rate limited
+                        continue
 
                 # Check if we got valid company data
                 if data and 'Symbol' in data and data.get('Name'):
@@ -237,10 +249,14 @@ def fetch_alpha_vantage_company_info(ticker: str) -> Optional[Dict]:
                     industry = data.get('Industry', '')
 
                     if name and len(name) > 1:
-                        logger.info(f"✓ Alpha Vantage company info for {ticker} (as {symbol}): {name} ({exchange})")
+                        logger.info(f"✓ Alpha Vantage company info SUCCESS: {ticker} → {symbol} = {name} ({exchange})")
 
                         # Build business description
                         business_description = industry if industry else description[:100] if description else f"{exchange} company"
+
+                        # Only sleep if we'll make another API call
+                        if idx < len(symbols_to_try) - 1:
+                            time.sleep(12)  # Alpha Vantage free tier: 5 calls/min
 
                         return {
                             'confirmed_name': name,
@@ -249,57 +265,104 @@ def fetch_alpha_vantage_company_info(ticker: str) -> Optional[Dict]:
                             'canonical_ticker': symbol,
                             'source': 'Alpha Vantage'
                         }
+                else:
+                    logger.debug(f"No valid data in response for {symbol}: {data.keys() if data else 'empty'}")
 
-                time.sleep(12)  # Alpha Vantage free tier: 5 calls/min
+                # Only sleep between attempts (not after last one)
+                if idx < len(symbols_to_try) - 1:
+                    time.sleep(12)
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Alpha Vantage HTTP error for {symbol}: {e}")
+                continue
             except Exception as e:
                 logger.warning(f"Alpha Vantage company info attempt failed for {symbol}: {e}")
                 continue
 
+        logger.error(f"❌ Alpha Vantage company info FAILED for {ticker} - all variants failed")
         return None
     except Exception as e:
-        logger.error(f"Alpha Vantage company info error for {ticker}: {e}")
+        logger.error(f"❌ Alpha Vantage company info EXCEPTION for {ticker}: {e}")
         return None
 
 
 def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
     """Fetch price data from Alpha Vantage as fallback (for Canadian TSX/CSE stocks)"""
     if not ALPHA_VANTAGE_API_KEY:
+        logger.error(f"❌ Alpha Vantage API key not set - cannot fetch price data for {ticker}")
         return None
 
     try:
         # Try Canadian exchange suffixes: .TO (TSX), .V (Venture), .CN (CSE)
-        symbols_to_try = [f"{ticker}.TO", f"{ticker}.V", f"{ticker}.CN", ticker]
+        # For Canadian stocks, .TO is most common, so try it first
+        symbols_to_try = [f"{ticker}.TO", f"{ticker}.V", f"{ticker}.CN"]
+        logger.info(f"Alpha Vantage price data: trying {symbols_to_try} for {ticker}")
 
-        for symbol in symbols_to_try:
+        for idx, symbol in enumerate(symbols_to_try):
             try:
                 url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={ALPHA_VANTAGE_API_KEY}"
-                response = requests.get(url, timeout=10)
+                response = requests.get(url, timeout=15)
+                response.raise_for_status()  # Raise error for bad status codes
                 data = response.json()
 
+                # Check for API rate limit message
+                if 'Note' in data or 'Information' in data:
+                    error_msg = data.get('Note') or data.get('Information')
+                    logger.warning(f"⚠ Alpha Vantage API message for {symbol}: {error_msg}")
+                    if 'call frequency' in error_msg.lower() or 'per minute' in error_msg.lower():
+                        logger.error(f"❌ Rate limit hit on Alpha Vantage - sleeping 60s")
+                        time.sleep(60)  # Wait a full minute if rate limited
+                        continue
+
+                # Check if we got valid quote data
                 if 'Global Quote' in data and data['Global Quote']:
                     quote = data['Global Quote']
+
+                    # Check if quote has data (empty quote means invalid ticker)
+                    if not quote.get('05. price'):
+                        logger.debug(f"Empty quote data for {symbol}")
+                        if idx < len(symbols_to_try) - 1:
+                            time.sleep(12)
+                        continue
+
                     price = float(quote.get('05. price', 0))
                     change_percent = float(quote.get('10. change percent', '0').rstrip('%'))
 
                     if price > 0:  # Valid data found
-                        logger.info(f"✓ Alpha Vantage success for {ticker} (as {symbol}): ${price:.2f}")
+                        logger.info(f"✓ Alpha Vantage price data SUCCESS: {ticker} → {symbol} = ${price:.2f} ({change_percent:+.2f}%)")
+
+                        # Only sleep if we'll make another API call
+                        if idx < len(symbols_to_try) - 1:
+                            time.sleep(12)
+
                         return {
                             'ticker': ticker,
                             'price': price,
                             'change_percent': change_percent,
                             'headlines': [],
-                            'news_sentiment': 'N/A',
                             'source': 'Alpha Vantage'
                         }
+                else:
+                    logger.debug(f"No 'Global Quote' in response for {symbol}: {data.keys() if data else 'empty'}")
 
-                time.sleep(12)  # Alpha Vantage free tier: 5 calls/min
+                # Only sleep between attempts (not after last one)
+                if idx < len(symbols_to_try) - 1:
+                    time.sleep(12)
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Alpha Vantage HTTP error for {symbol}: {e}")
+                continue
+            except ValueError as e:
+                logger.warning(f"Alpha Vantage data parsing error for {symbol}: {e}")
+                continue
             except Exception as e:
                 logger.warning(f"Alpha Vantage attempt failed for {symbol}: {e}")
                 continue
 
+        logger.error(f"❌ Alpha Vantage price data FAILED for {ticker} - all variants failed")
         return None
     except Exception as e:
-        logger.error(f"Alpha Vantage error for {ticker}: {e}")
+        logger.error(f"❌ Alpha Vantage price data EXCEPTION for {ticker}: {e}")
         return None
 
 
@@ -307,12 +370,10 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
     """Fetch price, change, and news for a single ticker
 
     Also verifies company identity if identity_cache is provided.
+
+    IMPORTANT: Canadian tickers use Alpha Vantage directly (Finnhub free tier doesn't support TSX)
     """
-    # Normalize Canadian tickers FIRST (add .TO suffix if needed)
     original_ticker = ticker
-    ticker = normalize_ticker(ticker)
-    if ticker != original_ticker:
-        logger.info(f"TICKER FETCH: Normalized {original_ticker} → {ticker}")
 
     # Verify company identity first (if cache provided)
     identity_verified = False
@@ -323,18 +384,43 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
         if not identity_verified:
             logger.warning(f"IDENTITY NOT VERIFIED: {original_ticker} - will flag in analysis")
 
+    # Check if this is a Canadian ticker - if so, use Alpha Vantage directly
+    is_canadian = original_ticker.upper() in CANADIAN_TICKER_MAP
+
+    if is_canadian:
+        logger.info(f"CANADIAN TICKER DETECTED: {original_ticker} - using Alpha Vantage directly")
+        av_data = fetch_alpha_vantage_data(original_ticker)
+        if av_data:
+            av_data['identity_verified'] = identity_verified
+            av_data['identity_data'] = identity_data
+            av_data['ticker'] = original_ticker
+            return av_data
+        else:
+            # Alpha Vantage failed for Canadian ticker
+            logger.error(f"Alpha Vantage failed for Canadian ticker {original_ticker}")
+            return {
+                'ticker': original_ticker,
+                'price': None,
+                'change_percent': None,
+                'headlines': [],
+                'source': 'N/A',
+                'identity_verified': identity_verified,
+                'identity_data': identity_data
+            }
+
+    # US stock - use Finnhub
     try:
-        # Get current price (using normalized ticker for API call)
-        quote = finnhub_client.quote(ticker)
+        # Get current price
+        quote = finnhub_client.quote(original_ticker)
         current_price = quote.get('c', 0)
         change_percent = quote.get('dp', 0)
 
-        # Get recent news (last 7 days) (using normalized ticker)
+        # Get recent news (last 7 days)
         end_date = datetime.now()
         start_date = end_date - timedelta(days=7)
 
         news = finnhub_client.company_news(
-            ticker,
+            original_ticker,
             _from=start_date.strftime('%Y-%m-%d'),
             to=end_date.strftime('%Y-%m-%d')
         )
@@ -347,7 +433,7 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
         # Check if we got valid price data
         if current_price > 0:
             return {
-                'ticker': original_ticker,  # Return with original ticker name
+                'ticker': original_ticker,
                 'price': current_price,
                 'change_percent': change_percent,
                 'headlines': headlines,
@@ -356,21 +442,20 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
                 'identity_data': identity_data
             }
         else:
-            # No price data from Finnhub, try Alpha Vantage
-            logger.warning(f"No price data from Finnhub for {ticker}, trying Alpha Vantage...")
-            av_data = fetch_alpha_vantage_data(original_ticker)  # Pass original ticker to AV
+            # No price data from Finnhub, try Alpha Vantage as fallback
+            logger.warning(f"No price data from Finnhub for {original_ticker}, trying Alpha Vantage...")
+            av_data = fetch_alpha_vantage_data(original_ticker)
             if av_data:
-                # Keep Finnhub news if available
                 av_data['headlines'] = headlines
                 av_data['identity_verified'] = identity_verified
                 av_data['identity_data'] = identity_data
-                av_data['ticker'] = original_ticker  # Ensure ticker matches
+                av_data['ticker'] = original_ticker
                 return av_data
             else:
-                # Both APIs failed, return ticker with N/A data
-                logger.warning(f"Both APIs failed for {ticker}, including with N/A data")
+                # Both APIs failed
+                logger.warning(f"Both APIs failed for {original_ticker}")
                 return {
-                    'ticker': original_ticker,  # Return with original ticker name
+                    'ticker': original_ticker,
                     'price': None,
                     'change_percent': None,
                     'headlines': headlines,
@@ -380,16 +465,17 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
                 }
 
     except Exception as e:
-        logger.error(f"Error fetching data for {ticker}: {e}")
+        logger.error(f"Error fetching data for {original_ticker}: {e}")
+
         # Retry once on rate limit
         if "rate limit" in str(e).lower():
-            logger.info(f"Rate limit hit for {ticker}, waiting 2s and retrying...")
+            logger.info(f"Rate limit hit for {original_ticker}, waiting 2s and retrying...")
             time.sleep(2)
             try:
-                quote = finnhub_client.quote(ticker)
+                quote = finnhub_client.quote(original_ticker)
                 if quote.get('c', 0) > 0:
                     return {
-                        'ticker': original_ticker,  # Use original ticker name
+                        'ticker': original_ticker,
                         'price': quote.get('c', 0),
                         'change_percent': quote.get('dp', 0),
                         'headlines': [],
@@ -401,17 +487,17 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
                 pass
 
         # Try Alpha Vantage as fallback
-        logger.warning(f"Finnhub failed for {ticker}, trying Alpha Vantage...")
-        av_data = fetch_alpha_vantage_data(original_ticker)  # Pass original ticker
+        logger.warning(f"Finnhub failed for {original_ticker}, trying Alpha Vantage...")
+        av_data = fetch_alpha_vantage_data(original_ticker)
         if av_data:
             av_data['identity_verified'] = identity_verified
             av_data['identity_data'] = identity_data
-            av_data['ticker'] = original_ticker  # Ensure ticker matches
+            av_data['ticker'] = original_ticker
             return av_data
 
         # Both failed, return N/A data
         return {
-            'ticker': original_ticker,  # Use original ticker name
+            'ticker': original_ticker,
             'price': None,
             'change_percent': None,
             'headlines': [],
@@ -663,16 +749,12 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
     - last_verified: str (date)
     - verification_confidence: str (HIGH/MEDIUM/LOW)
     - failed_verifications: int
+
+    IMPORTANT: Canadian tickers use Alpha Vantage directly (Finnhub free tier doesn't support TSX)
     """
     from datetime import datetime, timedelta
 
-    # Normalize Canadian tickers first (add .TO suffix if needed)
-    normalized_ticker = normalize_ticker(ticker)
-    if normalized_ticker != ticker:
-        logger.info(f"TICKER NORMALIZATION: {ticker} → {normalized_ticker}")
-
     # Clear stale failed verifications (LOW confidence older than 1 day)
-    # This ensures failed attempts are retried daily with exchange auto-detection
     if ticker in cache:
         cached = cache[ticker]
         if cached.get('verification_confidence') == 'LOW':
@@ -699,17 +781,45 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
         except:
             pass  # Cache entry invalid, re-verify
 
-    # Try normalized ticker first (handles Canadian .TO mapping), then variants
-    ticker_variants = [normalized_ticker] if normalized_ticker != ticker else [ticker]
+    # Check if this is a Canadian ticker - if so, use Alpha Vantage directly
+    is_canadian = ticker.upper() in CANADIAN_TICKER_MAP
 
-    # If base ticker has no suffix, try common Canadian exchanges
+    if is_canadian:
+        logger.info(f"CANADIAN TICKER DETECTED: {ticker} - using Alpha Vantage directly for identity verification")
+        av_company_info = fetch_alpha_vantage_company_info(ticker)
+
+        if av_company_info:
+            # Success with Alpha Vantage
+            identity_data = {
+                'confirmed_name': av_company_info['confirmed_name'],
+                'exchange': av_company_info['exchange'],
+                'business_description': av_company_info['business_description'],
+                'canonical_ticker': av_company_info['canonical_ticker'],
+                'last_verified': datetime.now().strftime('%Y-%m-%d'),
+                'verification_confidence': 'HIGH',
+                'failed_verifications': 0
+            }
+
+            cache[ticker] = identity_data
+            logger.info(f"IDENTITY VERIFIED via Alpha Vantage: {ticker} → {av_company_info['canonical_ticker']} = {av_company_info['confirmed_name']} ({av_company_info['exchange']})")
+            return True, identity_data
+        else:
+            # Alpha Vantage failed for Canadian ticker
+            logger.error(f"IDENTITY VERIFICATION FAILED: Canadian ticker {ticker} failed on Alpha Vantage")
+            return False, _record_failed_verification(ticker, cache)
+
+    # US stock - use Finnhub
+    logger.info(f"US TICKER: {ticker} - using Finnhub for identity verification")
+
+    # Try ticker as-is first, then with common exchange suffixes
+    ticker_variants = [ticker]
+
+    # If base ticker has no suffix, also try common US exchanges
     if '.' not in ticker:
-        if f"{ticker}.TO" not in ticker_variants:
-            ticker_variants.append(f"{ticker}.TO")  # TSX
-        ticker_variants.append(f"{ticker}.V")   # TSX Venture
-        ticker_variants.append(f"{ticker}.CN")  # Canadian Securities Exchange
+        # Don't add variants for now - Finnhub handles US tickers without suffix
 
-    logger.info(f"IDENTITY VERIFICATION: Will try {len(ticker_variants)} variants for {ticker}: {ticker_variants}")
+        pass
+
     last_error = None
 
     for ticker_variant in ticker_variants:
@@ -746,7 +856,7 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
                 'confirmed_name': name,
                 'exchange': exchange,
                 'business_description': business_description,
-                'canonical_ticker': ticker_variant,  # Store which format worked
+                'canonical_ticker': ticker_variant,
                 'last_verified': datetime.now().strftime('%Y-%m-%d'),
                 'verification_confidence': 'HIGH',
                 'failed_verifications': 0
@@ -766,13 +876,12 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
             last_error = e
             continue  # Try next variant
 
-    # All Finnhub variants failed - try Alpha Vantage fallback for Canadian stocks
-    logger.warning(f"IDENTITY VERIFICATION FAILED on Finnhub: {ticker} (tried {len(ticker_variants)} variants)")
+    # Finnhub failed - try Alpha Vantage as fallback for US stocks
+    logger.warning(f"IDENTITY VERIFICATION FAILED on Finnhub: {ticker}")
     if last_error:
         logger.error(f"Last Finnhub error: {last_error}")
 
-    # Try Alpha Vantage as fallback (supports Canadian TSX stocks on free tier)
-    logger.info(f"Trying Alpha Vantage fallback for {ticker}...")
+    logger.info(f"Trying Alpha Vantage fallback for US ticker {ticker}...")
     av_company_info = fetch_alpha_vantage_company_info(ticker)
 
     if av_company_info:
@@ -792,7 +901,7 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
         return True, identity_data
 
     # Both Finnhub and Alpha Vantage failed
-    logger.error(f"IDENTITY VERIFICATION FAILED: {ticker} (Finnhub and Alpha Vantage both failed)")
+    logger.error(f"IDENTITY VERIFICATION FAILED: {ticker} (both APIs failed)")
     return False, _record_failed_verification(ticker, cache)
 
 
@@ -1572,24 +1681,29 @@ MANDATORY RULES:
 8. If fewer than 5 candidates meet criteria, return as many as qualify (1-5).
    You should find opportunities even with warnings IF catalysts justify them.
 
-OUTPUT FORMAT (1-5 opportunities, or "No qualifying opportunities"):
-TICKER|COMPANY|CATALYST|EDGE|ENTRY|TARGET|STOP|RISK|EXCHANGE
+OUTPUT FORMAT - Each opportunity on one line with pipe-separated fields:
 
-CATALYST: Named event with date (30-50 words)
-EDGE: Why this vs. adding to existing position (20-30 words)
-ENTRY: Specific price range or condition (be precise)
-  - Good: "Current price $45-47 acceptable" or "Wait for pullback to $38-40"
-  - Bad: "Review before buying" or "Current levels"
-TARGET: Analyst PT or thesis-based price objective
-  - Good: "Analyst PT $65 (Jefferies, Apr 28)" or "Fair value $58 based on 2.5x P/S"
-  - Bad: "Upside potential" or "Monitor"
-STOP: Price level where thesis is broken (below which you'd exit)
-  - Good: "Stop below $32 (breaks 200-day MA and support)"
-  - Bad: "Manage risk"
-RISK: One specific risk with trigger (20-30 words)
-EXCHANGE: TSX or US
+Example format (do NOT output this example - replace with real data):
+NVDA|NVIDIA Corp|Q4 earnings beat on May 22 with $26B revenue (+262% YoY) and raised guidance for Q1 2026 to $28B, exceeding Street's $24.5B estimate|Exposure to AI data center capex cycle not held elsewhere in portfolio|Current price $895-905 acceptable given momentum and guidance raise|Analyst PT $1050 (Morgan Stanley, May 23)|Stop below $780 (breaks 50-day MA and Jan support)|Guidance miss or hyperscaler capex cut would break thesis|US
 
-Start immediately with first ticker or "No qualifying opportunities today"."""
+FIELD DESCRIPTIONS (what to put in each field - do NOT output these descriptions):
+TICKER - Stock symbol
+COMPANY - Full company name
+CATALYST - Named event with date (30-50 words). Must include: what happened, when (specific date), and numbers/details
+EDGE - Why this vs. adding to existing position (20-30 words)
+ENTRY - Specific price range or condition
+  Good: "Current price $45-47 acceptable" or "Wait for pullback to $38-40"
+  Bad: "Review before buying" or "Current levels"
+TARGET - Analyst PT or thesis-based price objective
+  Good: "Analyst PT $65 (Jefferies, Apr 28)" or "Fair value $58 based on 2.5x P/S"
+  Bad: "Upside potential" or "Monitor"
+STOP - Price level where thesis is broken (below which you'd exit)
+  Good: "Stop below $32 (breaks 200-day MA and support)"
+  Bad: "Manage risk"
+RISK - One specific risk with trigger (20-30 words)
+EXCHANGE - TSX or US
+
+Start immediately with first ticker line (pipe-separated) or "No qualifying opportunities today"."""
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
