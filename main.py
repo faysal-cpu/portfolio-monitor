@@ -308,22 +308,28 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
 
     Also verifies company identity if identity_cache is provided.
     """
+    # Normalize Canadian tickers FIRST (add .TO suffix if needed)
+    original_ticker = ticker
+    ticker = normalize_ticker(ticker)
+    if ticker != original_ticker:
+        logger.info(f"TICKER FETCH: Normalized {original_ticker} → {ticker}")
+
     # Verify company identity first (if cache provided)
     identity_verified = False
     identity_data = {}
 
     if identity_cache is not None:
-        identity_verified, identity_data = verify_company_identity(ticker, finnhub_client, identity_cache)
+        identity_verified, identity_data = verify_company_identity(original_ticker, finnhub_client, identity_cache)
         if not identity_verified:
-            logger.warning(f"IDENTITY NOT VERIFIED: {ticker} - will flag in analysis")
+            logger.warning(f"IDENTITY NOT VERIFIED: {original_ticker} - will flag in analysis")
 
     try:
-        # Get current price
+        # Get current price (using normalized ticker for API call)
         quote = finnhub_client.quote(ticker)
         current_price = quote.get('c', 0)
         change_percent = quote.get('dp', 0)
 
-        # Get recent news (last 7 days)
+        # Get recent news (last 7 days) (using normalized ticker)
         end_date = datetime.now()
         start_date = end_date - timedelta(days=7)
 
@@ -341,7 +347,7 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
         # Check if we got valid price data
         if current_price > 0:
             return {
-                'ticker': ticker,
+                'ticker': original_ticker,  # Return with original ticker name
                 'price': current_price,
                 'change_percent': change_percent,
                 'headlines': headlines,
@@ -352,18 +358,19 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
         else:
             # No price data from Finnhub, try Alpha Vantage
             logger.warning(f"No price data from Finnhub for {ticker}, trying Alpha Vantage...")
-            av_data = fetch_alpha_vantage_data(ticker)
+            av_data = fetch_alpha_vantage_data(original_ticker)  # Pass original ticker to AV
             if av_data:
                 # Keep Finnhub news if available
                 av_data['headlines'] = headlines
                 av_data['identity_verified'] = identity_verified
                 av_data['identity_data'] = identity_data
+                av_data['ticker'] = original_ticker  # Ensure ticker matches
                 return av_data
             else:
                 # Both APIs failed, return ticker with N/A data
                 logger.warning(f"Both APIs failed for {ticker}, including with N/A data")
                 return {
-                    'ticker': ticker,
+                    'ticker': original_ticker,  # Return with original ticker name
                     'price': None,
                     'change_percent': None,
                     'headlines': headlines,
@@ -382,7 +389,7 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
                 quote = finnhub_client.quote(ticker)
                 if quote.get('c', 0) > 0:
                     return {
-                        'ticker': ticker,
+                        'ticker': original_ticker,  # Use original ticker name
                         'price': quote.get('c', 0),
                         'change_percent': quote.get('dp', 0),
                         'headlines': [],
@@ -395,15 +402,16 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
 
         # Try Alpha Vantage as fallback
         logger.warning(f"Finnhub failed for {ticker}, trying Alpha Vantage...")
-        av_data = fetch_alpha_vantage_data(ticker)
+        av_data = fetch_alpha_vantage_data(original_ticker)  # Pass original ticker
         if av_data:
             av_data['identity_verified'] = identity_verified
             av_data['identity_data'] = identity_data
+            av_data['ticker'] = original_ticker  # Ensure ticker matches
             return av_data
 
         # Both failed, return N/A data
         return {
-            'ticker': ticker,
+            'ticker': original_ticker,  # Use original ticker name
             'price': None,
             'change_percent': None,
             'headlines': [],
