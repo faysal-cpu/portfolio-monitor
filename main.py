@@ -376,19 +376,38 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
     original_ticker = ticker
 
     # Verify company identity first (if cache provided)
+    # Check if Canadian FIRST - before verify_company_identity
+    is_canadian = original_ticker.upper() in CANADIAN_TICKER_MAP
+
     identity_verified = False
     identity_data = {}
 
     if identity_cache is not None:
-        identity_verified, identity_data = verify_company_identity(original_ticker, finnhub_client, identity_cache)
-        if not identity_verified:
-            logger.warning(f"IDENTITY NOT VERIFIED: {original_ticker} - will flag in analysis")
-
-    # Check if this is a Canadian ticker - if so, use Alpha Vantage directly
-    is_canadian = original_ticker.upper() in CANADIAN_TICKER_MAP
+        if is_canadian:
+            # For Canadian tickers, use Alpha Vantage only (skip Finnhub)
+            logger.info(f"CANADIAN TICKER DETECTED: {original_ticker} - verifying with Alpha Vantage only")
+            av_company_info = fetch_alpha_vantage_company_info(original_ticker)
+            if av_company_info:
+                from datetime import datetime
+                identity_data = {
+                    'confirmed_name': av_company_info['confirmed_name'],
+                    'exchange': av_company_info['exchange'],
+                    'business_description': av_company_info['business_description'],
+                    'canonical_ticker': av_company_info['canonical_ticker'],
+                    'last_verified': datetime.now().strftime('%Y-%m-%d'),
+                    'verification_confidence': 'HIGH',
+                    'failed_verifications': 0
+                }
+                identity_verified = True
+        else:
+            # US ticker - use normal Finnhub verification
+            identity_verified, identity_data = verify_company_identity(original_ticker, finnhub_client, identity_cache)
+            if not identity_verified:
+                logger.warning(f"IDENTITY NOT VERIFIED: {original_ticker} - will flag in analysis")
 
     if is_canadian:
-        logger.info(f"CANADIAN TICKER DETECTED: {original_ticker} - using Alpha Vantage directly")
+        # Fetch Canadian ticker data from Alpha Vantage
+        logger.info(f"Fetching Canadian ticker data from Alpha Vantage: {original_ticker}")
         av_data = fetch_alpha_vantage_data(original_ticker)
         if av_data:
             av_data['identity_verified'] = identity_verified
@@ -397,7 +416,7 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
             return av_data
         else:
             # Alpha Vantage failed for Canadian ticker
-            logger.error(f"Alpha Vantage failed for Canadian ticker {original_ticker}")
+            logger.error(f"❌ Alpha Vantage failed for Canadian ticker {original_ticker}")
             return {
                 'ticker': original_ticker,
                 'price': None,
