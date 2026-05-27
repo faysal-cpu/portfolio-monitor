@@ -366,6 +366,54 @@ def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
         return None
 
 
+def fetch_yahoo_finance_data(ticker: str) -> Optional[Dict]:
+    """Fetch price data from Yahoo Finance (FREE, no API key, supports TSX)"""
+    try:
+        # Try Canadian exchange suffixes for Yahoo Finance
+        symbols_to_try = [f"{ticker}.TO", f"{ticker}.V", f"{ticker}.CN"]
+        logger.info(f"Yahoo Finance: trying {symbols_to_try} for {ticker}")
+
+        for symbol in symbols_to_try:
+            try:
+                # Yahoo Finance v8 API endpoint
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+
+                # Extract price data from response
+                if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
+                    result = data['chart']['result'][0]
+                    meta = result.get('meta', {})
+
+                    current_price = meta.get('regularMarketPrice')
+                    prev_close = meta.get('previousClose')
+
+                    if current_price and prev_close and current_price > 0:
+                        change_percent = ((current_price - prev_close) / prev_close) * 100
+
+                        logger.info(f"✓ Yahoo Finance SUCCESS: {ticker} → {symbol} = ${current_price:.2f} ({change_percent:+.2f}%)")
+
+                        return {
+                            'ticker': ticker,
+                            'price': current_price,
+                            'change_percent': change_percent,
+                            'headlines': [],
+                            'source': 'Yahoo Finance'
+                        }
+
+            except Exception as e:
+                logger.debug(f"Yahoo Finance attempt failed for {symbol}: {e}")
+                continue
+
+        logger.error(f"❌ Yahoo Finance FAILED for {ticker} - all variants failed")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Yahoo Finance EXCEPTION for {ticker}: {e}")
+        return None
+
+
 def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict] = None) -> Optional[Dict]:
     """Fetch price, change, and news for a single ticker
 
@@ -415,17 +463,26 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
             av_data['ticker'] = original_ticker
             return av_data
         else:
-            # Alpha Vantage failed for Canadian ticker
-            logger.error(f"❌ Alpha Vantage failed for Canadian ticker {original_ticker}")
-            return {
-                'ticker': original_ticker,
-                'price': None,
-                'change_percent': None,
-                'headlines': [],
-                'source': 'N/A',
-                'identity_verified': identity_verified,
-                'identity_data': identity_data
-            }
+            # Alpha Vantage failed - try Yahoo Finance as backup
+            logger.warning(f"⚠ Alpha Vantage failed for {original_ticker} - trying Yahoo Finance backup")
+            yahoo_data = fetch_yahoo_finance_data(original_ticker)
+            if yahoo_data:
+                yahoo_data['identity_verified'] = identity_verified
+                yahoo_data['identity_data'] = identity_data
+                yahoo_data['ticker'] = original_ticker
+                return yahoo_data
+            else:
+                # Both Alpha Vantage and Yahoo Finance failed
+                logger.error(f"❌ All data sources failed for Canadian ticker {original_ticker}")
+                return {
+                    'ticker': original_ticker,
+                    'price': None,
+                    'change_percent': None,
+                    'headlines': [],
+                    'source': 'N/A',
+                    'identity_verified': identity_verified,
+                    'identity_data': identity_data
+                }
 
     # US stock - use Finnhub
     try:
