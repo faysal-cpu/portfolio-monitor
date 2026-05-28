@@ -9,6 +9,8 @@ import sys
 import time
 import logging
 import subprocess
+import json
+import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import anthropic
@@ -195,7 +197,6 @@ Your first character must be the emoji. No text before it."""
 
         if response_text:
             # Strip any intro text before the first emoji section header
-            import re
             # Find the first occurrence of emoji section headers
             emoji_pattern = r'(🛢️|💰|🌍)\s*(COMMODITIES|RATES|GEOPOLITICS)'
             match = re.search(emoji_pattern, response_text)
@@ -217,7 +218,10 @@ Your first character must be the emoji. No text before it."""
 def fetch_alpha_vantage_company_info(ticker: str) -> Optional[Dict]:
     """Fetch company info from Alpha Vantage (for Canadian TSX/CSE stocks)"""
     if not ALPHA_VANTAGE_API_KEY:
-        logger.error(f"❌ Alpha Vantage API key not set - cannot fetch company info for {ticker}")
+        logger.error(f"❌ Alpha Vantage API key not set - cannot verify identity for Canadian ticker {ticker}")
+        logger.error(f"   Set ALPHA_VANTAGE_API_KEY in Railway environment variables")
+        logger.error(f"   Get free key at: https://www.alphavantage.co/support/#api-key")
+        logger.warning(f"   Price data will still be fetched, but company identity won't be verified")
         return None
 
     try:
@@ -289,7 +293,7 @@ def fetch_alpha_vantage_company_info(ticker: str) -> Optional[Dict]:
 def fetch_alpha_vantage_data(ticker: str) -> Optional[Dict]:
     """Fetch price data from Alpha Vantage as fallback (for Canadian TSX/CSE stocks)"""
     if not ALPHA_VANTAGE_API_KEY:
-        logger.error(f"❌ Alpha Vantage API key not set - cannot fetch price data for {ticker}")
+        logger.warning(f"⚠️ Alpha Vantage API key not set - falling back to Yahoo Finance for {ticker}")
         return None
 
     try:
@@ -433,10 +437,9 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
     if identity_cache is not None:
         if is_canadian:
             # For Canadian tickers, use Alpha Vantage only (skip Finnhub)
-            logger.info(f"CANADIAN TICKER DETECTED: {original_ticker} - verifying with Alpha Vantage only")
+            logger.info(f"CANADIAN TICKER DETECTED: {original_ticker} - verifying with Alpha Vantage")
             av_company_info = fetch_alpha_vantage_company_info(original_ticker)
             if av_company_info:
-                from datetime import datetime
                 identity_data = {
                     'confirmed_name': av_company_info['confirmed_name'],
                     'exchange': av_company_info['exchange'],
@@ -447,6 +450,8 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
                     'failed_verifications': 0
                 }
                 identity_verified = True
+            else:
+                logger.warning(f"⚠️ Identity verification failed for Canadian ticker {original_ticker} - will still fetch price data")
         else:
             # US ticker - use normal Finnhub verification
             identity_verified, identity_data = verify_company_identity(original_ticker, finnhub_client, identity_cache)
@@ -559,7 +564,8 @@ def fetch_ticker_data(ticker: str, finnhub_client, identity_cache: Optional[Dict
                         'identity_verified': identity_verified,
                         'identity_data': identity_data
                     }
-            except:
+            except Exception as e:
+                logger.debug(f"Retry attempt failed for {original_ticker}: {e}")
                 pass
 
         # Try Alpha Vantage as fallback
@@ -595,20 +601,23 @@ def analyze_holdings(holdings_data: List[Dict], macro_context: str, rec_history:
             ticker = data['ticker']
             holdings_text += f"\n{ticker}:\n"
 
-            # Identity verification
+            # Price data (check first - if missing, this is NO DATA)
+            price = data.get('price')
+            if price is None:
+                holdings_text += f"  ⚠️ NO PRICE DATA AVAILABLE - OUTPUT 'NO DATA' FOR THIS TICKER\n"
+                continue  # Skip to next ticker
+
+            # We have price data, proceed with analysis
+            holdings_text += f"  Current Price: ${price:.2f}\n"
+
+            # Identity verification (informational, not blocking)
             if data.get('identity_verified'):
                 identity = data.get('identity_data', {})
                 holdings_text += f"  Company: {identity.get('confirmed_name', 'Unknown')} ({identity.get('exchange', 'Unknown')})\n"
                 holdings_text += f"  Business: {identity.get('business_description', 'N/A')}\n"
             else:
-                holdings_text += f"  ⚠️ IDENTITY NOT VERIFIED - OUTPUT 'NO DATA' FOR THIS TICKER\n"
-
-            # Price data
-            price = data.get('price')
-            if price is not None:
-                holdings_text += f"  Current Price: ${price:.2f}\n"
-            else:
-                holdings_text += f"  Current Price: N/A (DATA MISSING - OUTPUT 'NO DATA' FOR THIS TICKER)\n"
+                # Identity not verified but we have price data - still analyze
+                holdings_text += f"  ⚠️ Company identity not verified (API issue) - analyze based on ticker and available data\n"
 
             # Change percent
             change = data.get('change_percent')
@@ -639,8 +648,8 @@ HOLDINGS:
 {holdings_text}
 
 RULES:
-1. Identity not verified (⚠️) → "TICKER|NO DATA|N/A|Company identity could not be verified. Verify ticker symbol is correct.|N/A"
-2. Missing price → "TICKER|NO DATA|N/A|No price data|N/A"
+1. NO PRICE DATA (⚠️ NO PRICE DATA AVAILABLE) → "TICKER|NO DATA|N/A|No price data available|N/A"
+2. Identity not verified but price exists (⚠️ Company identity not verified) → ANALYZE NORMALLY, add note in REASON: "Note: Company identity verification pending"
 3. PENDING EXIT status → "TICKER|SELL|HIGH|Exit position|Capital preservation"
 4. Changed recommendation → Start REASON: "CHANGE FROM [prior] because [event]"
 5. Catalyst required: earnings date, analyst action (firm+date), contract, regulatory event, specific macro event
@@ -714,7 +723,6 @@ def load_recommendation_history() -> Dict:
     try:
         if os.path.exists(history_file):
             with open(history_file, 'r') as f:
-                import json
                 return json.load(f)
         return {}
     except Exception as e:
@@ -726,7 +734,6 @@ def save_recommendation_history(history: Dict):
     """Save complete recommendation history"""
     history_file = 'recommendations_history.json'
     try:
-        import json
         with open(history_file, 'w') as f:
             json.dump(history, f, indent=2)
         logger.info(f"Saved recommendation history with {len(history)} tickers")
@@ -754,7 +761,6 @@ def load_position_status() -> Dict:
     try:
         if os.path.exists(status_file):
             with open(status_file, 'r') as f:
-                import json
                 return json.load(f)
         return {}
     except Exception as e:
@@ -766,7 +772,6 @@ def save_position_status(status: Dict):
     """Save position status tracking"""
     status_file = 'position_status.json'
     try:
-        import json
         with open(status_file, 'w') as f:
             json.dump(status, f, indent=2)
         logger.info(f"Saved position status for {len(status)} tickers")
@@ -792,7 +797,6 @@ def load_company_identity_cache() -> Dict:
     try:
         if os.path.exists(cache_file):
             with open(cache_file, 'r') as f:
-                import json
                 return json.load(f)
         return {}
     except Exception as e:
@@ -804,7 +808,6 @@ def save_company_identity_cache(cache: Dict):
     """Save company identity verification cache"""
     cache_file = 'company_identity_cache.json'
     try:
-        import json
         with open(cache_file, 'w') as f:
             json.dump(cache, f, indent=2)
         logger.info(f"Saved company identity cache with {len(cache)} tickers")
@@ -828,7 +831,6 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
 
     IMPORTANT: Canadian tickers use Alpha Vantage directly (Finnhub free tier doesn't support TSX)
     """
-    from datetime import datetime, timedelta
 
     # Clear stale failed verifications (LOW confidence older than 1 day)
     if ticker in cache:
@@ -840,7 +842,8 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
                 if days_since >= 1:
                     logger.info(f"CLEARING STALE FAILED CACHE: {ticker} (failed {days_since} days ago, will retry)")
                     del cache[ticker]
-            except:
+            except Exception as e:
+                logger.debug(f"Error clearing stale cache for {ticker}: {e}")
                 pass
 
     # Check cache - if verified <7 days ago with HIGH confidence, return cached
@@ -854,7 +857,8 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
             if days_since < 7 and cached.get('verification_confidence') == 'HIGH':
                 logger.info(f"IDENTITY CACHE HIT: {ticker} verified {days_since} days ago")
                 return True, cached
-        except:
+        except Exception as e:
+            logger.debug(f"Error reading cache for {ticker}: {e}")
             pass  # Cache entry invalid, re-verify
 
     # Check if this is a Canadian ticker - if so, use Alpha Vantage directly
@@ -1004,7 +1008,6 @@ def load_recommendation_cache() -> Dict:
     try:
         if os.path.exists(cache_file):
             with open(cache_file, 'r') as f:
-                import json
                 cache = json.load(f)
                 # Clean old entries (older than 14 days)
                 cutoff = (datetime.now() - timedelta(days=14)).isoformat()
@@ -1020,7 +1023,6 @@ def save_recommendation_cache(cache: Dict):
     """Save cache of recently recommended stocks"""
     cache_file = 'recommendations_cache.json'
     try:
-        import json
         with open(cache_file, 'w') as f:
             json.dump(cache, f, indent=2)
         logger.info(f"Saved {len(cache)} tickers to recommendation cache")
@@ -1034,7 +1036,6 @@ def load_opportunity_scorecard() -> Dict:
     try:
         if os.path.exists(scorecard_file):
             with open(scorecard_file, 'r') as f:
-                import json
                 scorecard = json.load(f)
                 # Filter to last 7 days only
                 cutoff_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -1050,7 +1051,6 @@ def save_opportunity_scorecard(scorecard: Dict):
     """Save opportunity scorecard"""
     scorecard_file = 'opportunity_scorecard.json'
     try:
-        import json
         with open(scorecard_file, 'w') as f:
             json.dump(scorecard, f, indent=2)
         total_opps = sum(len(opps) for opps in scorecard.values())
@@ -1276,7 +1276,6 @@ def load_price_anomaly_log() -> Dict:
     try:
         if os.path.exists(log_file):
             with open(log_file, 'r') as f:
-                import json
                 return json.load(f)
         return {}
     except Exception as e:
@@ -1288,7 +1287,6 @@ def save_price_anomaly_log(log: Dict):
     """Save price anomaly tracking log"""
     log_file = 'price_anomaly_log.json'
     try:
-        import json
         with open(log_file, 'w') as f:
             json.dump(log, f, indent=2)
         logger.info(f"Saved price anomaly log for {len(log)} tickers")
@@ -1426,7 +1424,6 @@ def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Di
 
     # Source 1: Market Movers - Top Gainers
     try:
-        from datetime import datetime
         today = datetime.now().strftime('%Y-%m-%d')
         market_movers = finnhub_client.stock_symbols('US')
 
@@ -1444,7 +1441,8 @@ def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Di
                     if len(movers) >= 10:
                         break
                 time.sleep(0.1)
-            except:
+            except Exception as e:
+                logger.debug(f"Error fetching market mover: {e}")
                 continue
 
         trending.update(movers)
@@ -1461,7 +1459,6 @@ def get_trending_tickers(finnhub_client, current_holdings: List[str]) -> List[Di
             # Look for ticker patterns in headlines and summaries
             text = f"{article.get('headline', '')} {article.get('summary', '')}".upper()
             # Extract potential tickers (2-5 letter uppercase words with $ prefix or standalone)
-            import re
             potential_tickers = re.findall(r'\$([A-Z]{2,5})\b|\b([A-Z]{2,5})\b', text)
             for match in potential_tickers:
                 ticker = match[0] or match[1]
@@ -1503,8 +1500,7 @@ Return ONLY a comma-separated list of ticker symbols. No explanations."""
                 response_text += block.text
 
         # Parse tickers from response
-        import re
-        claude_tickers = re.findall(r'\b[A-Z]{2,5}\b', response_text)
+            claude_tickers = re.findall(r'\b[A-Z]{2,5}\b', response_text)
         trending.update(claude_tickers[:10])
         logger.info(f"Claude suggested {len(claude_tickers)} trending tickers")
     except Exception as e:
@@ -1792,8 +1788,7 @@ Start immediately with first ticker line (pipe-separated) or "No qualifying oppo
         logger.info("Successfully found opportunities with audit filters")
 
         # Extract recommended tickers from response
-        import re
-        lines = response.strip().split('\n')
+            lines = response.strip().split('\n')
         recommended_tickers = []
 
         # Check if response says no opportunities
@@ -2345,7 +2340,6 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 """
 
     # Process macro context: strip intro, convert markdown, add line breaks
-    import re
     processed_macro = macro_context
 
     # Strip intro text (everything before first ### or numbered section)
@@ -2478,7 +2472,6 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
 
         for opp in opportunities:
             # Convert markdown **text** to HTML <strong>text</strong>
-            import re
             catalyst = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('catalyst', opp.get('why_today', '')))
             company = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('company', ''))
             edge = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', opp.get('edge', 'See catalyst'))
