@@ -1788,7 +1788,7 @@ Start immediately with first ticker line (pipe-separated) or "No qualifying oppo
         logger.info("Successfully found opportunities with audit filters")
 
         # Extract recommended tickers from response
-            lines = response.strip().split('\n')
+        lines = response.strip().split('\n')
         recommended_tickers = []
 
         # Check if response says no opportunities
