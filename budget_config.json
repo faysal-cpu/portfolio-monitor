@@ -1,0 +1,17 @@
+{
+  "_comment": "Optional: Set monthly budget targets for each category. Leave at 0 to disable budget tracking for that category.",
+  "monthly_budgets": {
+    "Groceries": 500,
+    "Food & Dining": 400,
+    "Shopping": 300,
+    "Transport": 200,
+    "Entertainment": 150,
+    "Health": 200,
+    "Travel": 0,
+    "Bills & Utilities": 0,
+    "Other": 0
+  },
+  "total_monthly_budget": 2500,
+  "enable_budget_alerts": true,
+  "alert_threshold_percent": 90
+}

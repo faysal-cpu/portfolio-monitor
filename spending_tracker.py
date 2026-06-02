@@ -27,6 +27,26 @@ import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 import schedule
 
+# Import enhanced analytics modules
+try:
+    from spending_enhancements import (
+        detect_outliers, calculate_recurring_vs_discretionary,
+        generate_actionable_insights, calculate_3month_trend,
+        analyze_category_deep_dive, audit_subscriptions,
+        calculate_net_spending, predict_upcoming_charges
+    )
+    from spending_html_enhanced import (
+        generate_outlier_section, generate_net_spending_section,
+        generate_recurring_vs_discretionary_section, generate_insights_section,
+        generate_3month_trend_section, generate_category_deep_dive_section,
+        generate_subscription_audit_section, generate_upcoming_charges_section,
+        generate_budget_tracking_section
+    )
+    ENHANCEMENTS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Enhanced analytics not available: {e}")
+    ENHANCEMENTS_AVAILABLE = False
+
 
 # Configure logging
 logging.basicConfig(
@@ -1629,6 +1649,52 @@ def generate_html_report(year: int, month: int, transactions: List[Transaction],
                             </table>
                         </td>
                     </tr>"""
+
+    # ========== NEW ENHANCED SECTIONS ==========
+    if ENHANCEMENTS_AVAILABLE:
+        # 1. Net vs Gross Spending
+        net_data = calculate_net_spending(transactions)
+        html += generate_net_spending_section(net_data)
+
+        # 2. Outlier Detection
+        outlier_data = detect_outliers(transactions, threshold=500.0)
+        prev_total = prev_month_data['total_spent'] if prev_month_data else None
+        html += generate_outlier_section(outlier_data, prev_total)
+
+        # 3. Recurring vs Discretionary Split
+        split_data = calculate_recurring_vs_discretionary(transactions)
+        html += generate_recurring_vs_discretionary_section(split_data)
+
+        # 4. 3-Month Trend
+        trend_data = calculate_3month_trend(history, year, month)
+        html += generate_3month_trend_section(trend_data)
+
+        # 5. Actionable Insights
+        insights_data = generate_actionable_insights(transactions, prev_month_data, outlier_data)
+        html += generate_insights_section(insights_data)
+
+        # 6. Food & Dining Deep Dive
+        dining_deep_dive = analyze_category_deep_dive(transactions, 'Food & Dining')
+        html += generate_category_deep_dive_section(dining_deep_dive, 'Food & Dining')
+
+        # 7. Subscription Audit
+        if subscriptions:
+            audit_data = audit_subscriptions(subscriptions, transactions)
+            html += generate_subscription_audit_section(audit_data)
+
+        # 8. Upcoming Charges
+        upcoming_charges = predict_upcoming_charges(subscriptions, month)
+        html += generate_upcoming_charges_section(upcoming_charges)
+
+        # 9. Budget Tracking (optional)
+        try:
+            budget_config_path = os.path.join(script_dir, 'budget_config.json')
+            if os.path.exists(budget_config_path):
+                with open(budget_config_path, 'r') as f:
+                    budget_config = json.load(f)
+                html += generate_budget_tracking_section(category_totals, budget_config)
+        except Exception as e:
+            logger.debug(f"Budget tracking not available: {e}")
 
     # Categories section
     html += """
