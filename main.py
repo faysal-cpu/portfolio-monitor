@@ -651,7 +651,7 @@ RULES:
 1. NO PRICE DATA (⚠️ NO PRICE DATA AVAILABLE) → "TICKER|NO DATA|N/A|No price data available|N/A"
 2. Identity not verified but price exists (⚠️ Company identity not verified) → ANALYZE NORMALLY, add note in REASON: "Note: Company identity verification pending"
 3. PENDING EXIT status → "TICKER|SELL|HIGH|Exit position|Capital preservation"
-4. Changed recommendation → Start REASON: "CHANGE FROM [prior] because [event]"
+4. Changed recommendation → CRITICAL: Only change recommendations based on FUNDAMENTAL CATALYSTS (earnings, analyst upgrades/downgrades, contracts, M&A), NOT daily price moves. A stock up 5-10% on good news should STAY BUY MORE if fundamentals remain strong. A stock down 2-5% with no bad news should NOT be downgraded. When changing, start REASON: "CHANGE FROM [prior] because [specific fundamental event]"
 5. Catalyst required: earnings date, analyst action (firm+date), contract, regulatory event, specific macro event
 6. BANNED: "thesis intact", "kills", "demands action", "unambiguous", "firing on all cylinders", "gift", "market is underreacting", "transformational"
 
@@ -865,28 +865,48 @@ def verify_company_identity(ticker: str, finnhub_client, cache: Dict) -> Tuple[b
     is_canadian = ticker.upper() in CANADIAN_TICKER_MAP
 
     if is_canadian:
-        logger.info(f"CANADIAN TICKER DETECTED: {ticker} - using Alpha Vantage directly for identity verification")
-        av_company_info = fetch_alpha_vantage_company_info(ticker)
+        logger.info(f"CANADIAN TICKER DETECTED: {ticker} - verifying identity")
 
-        if av_company_info:
-            # Success with Alpha Vantage
+        # Try Alpha Vantage first if API key available
+        if ALPHA_VANTAGE_API_KEY:
+            av_company_info = fetch_alpha_vantage_company_info(ticker)
+            if av_company_info:
+                # Success with Alpha Vantage
+                identity_data = {
+                    'confirmed_name': av_company_info['confirmed_name'],
+                    'exchange': av_company_info['exchange'],
+                    'business_description': av_company_info['business_description'],
+                    'canonical_ticker': av_company_info['canonical_ticker'],
+                    'last_verified': datetime.now().strftime('%Y-%m-%d'),
+                    'verification_confidence': 'HIGH',
+                    'failed_verifications': 0
+                }
+                cache[ticker] = identity_data
+                logger.info(f"IDENTITY VERIFIED via Alpha Vantage: {ticker} → {av_company_info['canonical_ticker']} = {av_company_info['confirmed_name']} ({av_company_info['exchange']})")
+                return True, identity_data
+
+        # Alpha Vantage failed or unavailable - try Yahoo Finance fallback
+        logger.info(f"Trying Yahoo Finance fallback for Canadian ticker {ticker}")
+        yahoo_data = fetch_yahoo_finance_data(ticker)
+        if yahoo_data and yahoo_data.get('price') and yahoo_data['price'] > 0:
+            # Yahoo has price data - create basic identity
+            canonical_ticker = CANADIAN_TICKER_MAP.get(ticker.upper(), ticker)
             identity_data = {
-                'confirmed_name': av_company_info['confirmed_name'],
-                'exchange': av_company_info['exchange'],
-                'business_description': av_company_info['business_description'],
-                'canonical_ticker': av_company_info['canonical_ticker'],
+                'confirmed_name': f"{ticker} (TSX)",  # Basic fallback name
+                'exchange': 'Toronto Stock Exchange',
+                'business_description': 'Canadian public company',
+                'canonical_ticker': canonical_ticker,
                 'last_verified': datetime.now().strftime('%Y-%m-%d'),
-                'verification_confidence': 'HIGH',
+                'verification_confidence': 'MEDIUM',  # Lower confidence without full company info
                 'failed_verifications': 0
             }
-
             cache[ticker] = identity_data
-            logger.info(f"IDENTITY VERIFIED via Alpha Vantage: {ticker} → {av_company_info['canonical_ticker']} = {av_company_info['confirmed_name']} ({av_company_info['exchange']})")
+            logger.info(f"IDENTITY VERIFIED via Yahoo Finance: {ticker} → {canonical_ticker} (price confirmed)")
             return True, identity_data
-        else:
-            # Alpha Vantage failed for Canadian ticker
-            logger.error(f"IDENTITY VERIFICATION FAILED: Canadian ticker {ticker} failed on Alpha Vantage")
-            return False, _record_failed_verification(ticker, cache)
+
+        # Both failed
+        logger.error(f"IDENTITY VERIFICATION FAILED: Canadian ticker {ticker} failed on both Alpha Vantage and Yahoo Finance")
+        return False, _record_failed_verification(ticker, cache)
 
     # US stock - use Finnhub
     logger.info(f"US TICKER: {ticker} - using Finnhub for identity verification")
