@@ -636,7 +636,11 @@ RULES:
 3. PENDING EXIT status → "TICKER|SELL|HIGH|Exit position|Capital preservation"
 4. Changed recommendation → CRITICAL: Only change recommendations based on FUNDAMENTAL CATALYSTS (earnings, analyst upgrades/downgrades, contracts, M&A), NOT daily price moves. A stock up 5-10% on good news should STAY BUY MORE if fundamentals remain strong. A stock down 2-5% with no bad news should NOT be downgraded. When changing, start REASON: "CHANGE FROM [prior] because [specific fundamental event]"
 5. Catalyst required: earnings date, analyst action (firm+date), contract, regulatory event, specific macro event
-6. BANNED: "thesis intact", "kills", "demands action", "unambiguous", "firing on all cylinders", "gift", "market is underreacting", "transformational"
+6. BANNED JARGON - YOU WILL BE PENALIZED FOR USING THESE:
+   "thesis intact", "kills", "demands action", "unambiguous", "firing on all cylinders", "gift",
+   "market is underreacting", "transformational", "secular tailwind", "headwind", "capex cycle",
+   "beneficiary of", "maintains Overweight", "PT" (say "price target"), "macro weakness",
+   "company-specific", "not company-specific", "broad market weakness"
 
 7. CONFIDENCE CALIBRATION RUBRIC (STRICTLY ENFORCED):
    For BUY MORE recommendations, count how many of these 5 conditions are TRUE:
@@ -675,7 +679,16 @@ RULES:
    When triggered: Evaluate whether to recommend SELL. If NOT selling, explicitly state why in REASON.
    Example: "HOLD despite -12% week — pullback on sector rotation, fundamentals intact, next catalyst is [date/event]"
 
-9. Max words: REASON 80, RISK 50
+9. WRITING STYLE - MANDATORY (PLAIN ENGLISH ONLY):
+   - Write like you're texting a friend about stocks, NOT writing a Bloomberg article
+   - NO JARGON: See banned list in Rule 6
+   - Be conversational and specific with numbers
+
+   BAD EXAMPLE (JARGON): "Dycom is a direct beneficiary of fiber/broadband infrastructure buildout — secular tailwind from telecom capex cycle. KeyBanc maintains Overweight, raises PT to $610 (June 2026) — 23.5% upside from $493.89. -3.16% today on broad market weakness, not company-specific."
+
+   GOOD EXAMPLE (PLAIN ENGLISH): "Dycom builds fiber internet infrastructure. KeyBanc analyst raised price target to $610 (24% upside). Down 3% today but no bad news — just market selling off."
+
+   - Max words: REASON 60, RISK 40
 
 Output ONLY pipe lines:
 TICKER|RECOMMENDATION|CONFIDENCE|REASON|RISK
