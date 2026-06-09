@@ -642,42 +642,51 @@ RULES:
    "beneficiary of", "maintains Overweight", "PT" (say "price target"), "macro weakness",
    "company-specific", "not company-specific", "broad market weakness"
 
-7. CONFIDENCE CALIBRATION RUBRIC (STRICTLY ENFORCED):
-   For BUY MORE recommendations, count how many of these 5 conditions are TRUE:
-   a) Strong analyst consensus: 2+ analysts with Buy/Outperform rating AND recent PT raise (last 60 days)
-   b) Recent earnings beat: Last quarterly report (within 60 days) beat on revenue or EPS
-   c) Macro tailwind: Direct relevance to today's macro context (specific, not generic)
-   d) Technical confirmation: Stock up today OR holding key support level (not down >3%)
-   e) No material unresolved risk: No dilution risk, sharp unexplained drop, or governance flag
+7. CONFIDENCE CALIBRATION - BE DECISIVE:
 
-   STRICT Assignment Rules:
-   - 4+ conditions true = HIGH confidence (exceptional conviction)
-   - 2-3 conditions true = MEDIUM confidence (balanced view)
-   - 0-1 conditions true = LOW confidence (limited support) OR downgrade to HOLD
+   For BUY MORE:
+   - HIGH: Clear catalyst (earnings beat, analyst upgrade, major contract) + positive momentum
+   - MEDIUM: One solid catalyst OR strong fundamentals but weak price action
+   - LOW: Speculative thesis with no near-term catalyst
 
-   For HOLD recommendations:
-   - MEDIUM confidence is default for stable positions with no clear catalyst
-   - LOW confidence if major unresolved risk present (dilution, governance, sharp drop unexplained)
-   - HIGH confidence should be RARE for HOLD (only if all fundamentals strong but just lacks catalyst)
+   DEFAULT TO BUY MORE if:
+   - Stock has positive fundamental news in last 30 days AND isn't down >5% today
+   - Analyst raised price target in last 60 days
+   - Recent earnings beat (last quarter)
+   - Clear macro tailwind (defense/AI/energy relevant to today's context)
 
-   For SELL/WATCH:
-   - HIGH confidence if 2+ sell triggers met with clear catalyst
-   - MEDIUM confidence if deteriorating trend
-   - LOW confidence if only minor concerns
+   For HOLD:
+   - Use HOLD when there's NO reason to add more and NO reason to exit
+   - HIGH confidence HOLD: Strong business, no catalyst to buy more right now
+   - MEDIUM confidence HOLD: Waiting for clarity on a specific event
+   - LOW confidence HOLD: Monitoring for potential exit
 
-   DO NOT default everything to MEDIUM. Differentiate clearly.
+   For SELL:
+   - HIGH: Fundamentals broken (guidance cut, contract loss, fraud) OR 2+ red flags
+   - MEDIUM: Deteriorating trend, considering exit
+   - LOW: Minor concerns, watching closely
 
-8. MANDATORY SELL EVALUATION TRIGGERS:
-   If a holding meets 2+ of these criteria, you MUST explicitly evaluate for SELL:
-   a) Down >8% single day with no positive news explaining it
-   b) Down >15% over last 5 trading days (if data available)
-   c) Large unexplained move (>10% either direction, <2 news articles)
-   d) Dilutive financing: offering/shelf prospectus with terms undisclosed or unfavorable
-   e) Governance red flag: AGM adjournment, material insider selling, restatement risk
-   f) Identity unconfirmed for 2+ consecutive days
+   BIAS TOWARD ACTION: If you're unsure between BUY MORE and HOLD, pick BUY MORE if any positive catalyst exists. If unsure between HOLD and SELL, stay HOLD unless fundamentals clearly broken.
 
-   When triggered: Evaluate whether to recommend SELL. If NOT selling, explicitly state why in REASON.
-   Example: "HOLD despite -12% week — pullback on sector rotation, fundamentals intact, next catalyst is [date/event]"
+8. SELL TRIGGERS - WHEN TO EXIT:
+
+   IMMEDIATE SELL (HIGH confidence):
+   - Guidance cut, earnings miss with reduced outlook, or major contract loss
+   - Dilutive financing with terrible terms (>20% discount, massive warrant coverage)
+   - Fraud, governance scandal, or CEO departure under suspicious circumstances
+   - Down >20% with clear fundamental reason (not just market selloff)
+
+   CONSIDER SELL (evaluate case-by-case):
+   - Down >15% over 5 days with NO positive news and NO clear macro explanation
+   - Stock at 52-week high with no new catalyst and you're up >100%
+   - Sector rotation away with no bottom in sight
+
+   DO NOT SELL just because:
+   - Down 8-12% in one day during broader market selloff (compare to sector peers)
+   - Temporary headline risk with fundamentals intact
+   - Analyst downgrade from one firm (need pattern of downgrades)
+
+   When in doubt: Default to HOLD and state what you're watching for. Better to hold through noise than panic sell.
 
 9. WRITING STYLE - MANDATORY (PLAIN ENGLISH ONLY):
    - Write like you're texting a friend about stocks, NOT writing a Bloomberg article
@@ -2337,6 +2346,36 @@ def create_html_email(macro_context: str, holdings: List[Dict], opportunities: L
     <div class="container">
         <div class="header">
             <h1>📈 Portfolio Brief — {date_str} | {len(holdings)} positions</h1>
+        </div>
+"""
+
+    # Generate action items first (before price anomalies)
+    action_items = []
+
+    # Find BUY MORE with HIGH confidence
+    high_conviction_buys = [h for h in holdings if 'BUY' in h['recommendation'].upper() and h.get('confidence', '').upper() == 'HIGH']
+    for h in high_conviction_buys[:2]:  # Max 2
+        action_items.append(f"<strong>✅ BUY:</strong> {h['ticker']} - {h['reason'][:80]}...")
+
+    # Find new SELLs (not already PENDING EXIT)
+    new_sells = [h for h in holdings if 'SELL' in h['recommendation'].upper() and h.get('status', 'OPEN') != 'PENDING EXIT']
+    for h in new_sells[:2]:  # Max 2
+        action_items.append(f"<strong>🚨 SELL:</strong> {h['ticker']} - {h['reason'][:80]}...")
+
+    # Find recommendation changes that matter
+    if recommendation_changes:
+        major_changes = [c for c in recommendation_changes if c.get('was') in ['BUY MORE', 'SELL'] or c.get('now') in ['BUY MORE', 'SELL']]
+        for c in major_changes[:1]:  # Max 1
+            action_items.append(f"<strong>⚠️ CHANGED:</strong> {c['ticker']} {c['was']} → {c['now']}")
+
+    # Add action items section if we have any
+    if action_items:
+        html += f"""
+        <div class="section" style="background: linear-gradient(135deg, #fff5e6 0%, #ffe5cc 100%); border-left: 4px solid #ff9800;">
+            <h2>⚡ DO THIS NOW</h2>
+            <div style="font-size: 15px; line-height: 1.8;">
+                {"<br>".join(action_items)}
+            </div>
         </div>
 """
 
